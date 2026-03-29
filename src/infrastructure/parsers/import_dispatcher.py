@@ -5,8 +5,10 @@ Chain: tree-sitter -> ast-grep -> Python AST / regex fallback.
 
 from __future__ import annotations
 
-from src.domain.value_object.import_ref import ImportRef
+from src.domain.entity.import_ref import ImportRef
 from src.infrastructure.parsers.language_detector import detect_language
+from src.infrastructure.parsers import tree_sitter_parser as ts
+from src.infrastructure.parsers import ast_grep_parser as ag
 from src.infrastructure.parsers.python_ast_parser import parse_python_imports
 from src.infrastructure.parsers import regex_parsers as rp
 
@@ -36,9 +38,17 @@ def dispatch_parse_imports(file_path: str, source: str) -> list[ImportRef]:
     if not lang:
         return []
 
-    # TODO: add tree-sitter and ast-grep layers here when available
-    # For now, go straight to regex/AST fallback
+    # Layer 1: tree-sitter (most precise)
+    results = ts.parse_imports(source, lang)
+    if results:
+        return results
 
+    # Layer 2: ast-grep (pattern-based AST)
+    results = ag.parse_imports(file_path, source, lang)
+    if results:
+        return results
+
+    # Layer 3: regex / Python AST fallback
     parser = _REGEX_DISPATCH.get(lang)
     if parser:
         return parser(source)

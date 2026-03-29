@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from src.domain.value_object.import_ref import ImportRef
+from src.domain.entity.import_ref import ImportRef
 
 # ---------------------------------------------------------------------------
 # C / C++
@@ -54,16 +54,16 @@ _GO_PATH_RE = re.compile(r'"([\w./\-]+)"')
 def parse_go(source: str) -> list[ImportRef]:
     results, seen = [], set()
     for m in _GO_SINGLE_RE.finditer(source):
-        p = m.group(1)
-        if p not in seen:
-            seen.add(p)
-            results.append(ImportRef(p, p, "package"))
+        path = m.group(1)
+        if path not in seen:
+            seen.add(path)
+            results.append(ImportRef(path, path, "package"))
     for block in _GO_BLOCK_RE.finditer(source):
         for pm in _GO_PATH_RE.finditer(block.group(1)):
-            p = pm.group(1)
-            if p not in seen:
-                seen.add(p)
-                results.append(ImportRef(p, p, "package"))
+            path = pm.group(1)
+            if path not in seen:
+                seen.add(path)
+                results.append(ImportRef(path, path, "package"))
     return results
 
 
@@ -89,10 +89,10 @@ def parse_rust(source: str) -> list[ImportRef]:
             seen.add(mod)
             results.append(ImportRef(mod, mod, "module"))
     for m in _RUST_EXTERN_RE.finditer(source):
-        c = m.group(1)
-        if c not in seen:
-            seen.add(c)
-            results.append(ImportRef(c, c, "crate"))
+        crate = m.group(1)
+        if crate not in seen:
+            seen.add(crate)
+            results.append(ImportRef(crate, crate, "crate"))
     return results
 
 
@@ -152,16 +152,16 @@ _BUCK_STR_RE = re.compile(r'"([^"]+)"')
 def parse_buck2(source: str) -> list[ImportRef]:
     results, seen = [], set()
     for m in _BUCK_LOAD_RE.finditer(source):
-        t = m.group(1)
-        if t not in seen:
-            seen.add(t)
-            results.append(ImportRef(t, t, "load"))
+        target = m.group(1)
+        if target not in seen:
+            seen.add(target)
+            results.append(ImportRef(target, target, "load"))
     for block in _BUCK_DEPS_RE.finditer(source):
         for sm in _BUCK_STR_RE.finditer(block.group(1)):
-            d = sm.group(1)
-            if d not in seen:
-                seen.add(d)
-                results.append(ImportRef(d, d, "target"))
+            dep = sm.group(1)
+            if dep not in seen:
+                seen.add(dep)
+                results.append(ImportRef(dep, dep, "target"))
     return results
 
 
@@ -187,15 +187,15 @@ _BXL_TARGET_RE = re.compile(r'"(//[\w/.\-]+(?::[\w.\-]+)?)"', re.MULTILINE)
 def parse_bxl(source: str) -> list[ImportRef]:
     results, seen = [], set()
     for m in _BXL_LOAD_RE.finditer(source):
-        t = m.group(1)
-        if t not in seen:
-            seen.add(t)
-            results.append(ImportRef(t, t, "load"))
+        load = m.group(1)
+        if load not in seen:
+            seen.add(load)
+            results.append(ImportRef(load, load, "load"))
     for m in _BXL_TARGET_RE.finditer(source):
-        t = m.group(1)
-        if t not in seen:
-            seen.add(t)
-            results.append(ImportRef(t, t, "target"))
+        target = m.group(1)
+        if target not in seen:
+            seen.add(target)
+            results.append(ImportRef(target, target, "target"))
     return results
 
 
@@ -232,10 +232,10 @@ def parse_gradle_groovy(source: str) -> list[ImportRef]:
             seen.add(proj)
             results.append(ImportRef(proj, proj, "project"))
     for m in _GRADLE_APPLY_RE.finditer(source):
-        p = m.group(1)
-        if p not in seen:
-            seen.add(p)
-            results.append(ImportRef(p, p, "script"))
+        script = m.group(1)
+        if script not in seen:
+            seen.add(script)
+            results.append(ImportRef(script, script, "script"))
     for m in _GRADLE_PLUGIN_RE.finditer(source):
         plugin = m.group(1) or m.group(2)
         if plugin and plugin not in seen:

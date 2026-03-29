@@ -6,19 +6,19 @@ from src.domain.entity.proposed_pr import ProposedPR
 from src.domain.policy.risk_policy import compute_risk
 
 
-def _f(path, added=10, removed=5):
+def _make_file(path, added=10, removed=5):
     return ChangedFile(path=path, added=added, removed=removed, status="M")
 
 
 class TestRiskScorer(unittest.TestCase):
     def test_low_risk(self):
-        pr = ProposedPR(index=1, title="t", files=[_f("a.py", 5, 0)])
-        self.assertLess(compute_risk(pr), 0.3)
+        proposed_pr = ProposedPR(index=1, title="t", files=[_make_file("a.py", 5, 0)])
+        self.assertLess(compute_risk(proposed_pr), 0.3)
 
     def test_high_risk(self):
-        pr = ProposedPR(
+        proposed_pr = ProposedPR(
             index=1, title="t",
-            files=[_f(f"f{i}.py", 100, 50) for i in range(3)],
+            files=[_make_file(f"f{i}.py", 100, 50) for i in range(3)],
             depends_on=[2, 3, 4, 5, 6],
         )
-        self.assertGreater(compute_risk(pr), 0.3)
+        self.assertGreater(compute_risk(proposed_pr), 0.3)

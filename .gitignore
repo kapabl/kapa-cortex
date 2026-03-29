@@ -8,3 +8,4 @@ dist/
 build/
 .stacker-cache/
 .stacked-pr-plan.json
+.history/

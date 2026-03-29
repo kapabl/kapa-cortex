@@ -24,8 +24,3 @@ class GitReader(ABC):
 
     @abstractmethod
     def file_source(self, path: str) -> str: ...
-
-    @abstractmethod
-    def cochange_history(
-        self, paths: list[str], max_commits: int = 200,
-    ) -> dict[tuple[str, str], int]: ...

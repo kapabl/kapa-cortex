@@ -50,8 +50,8 @@ class ExtractFilesUseCase:
             matched = self._llm_match(prompt, all_files)
 
         resolved = self._resolve_deps(matched, all_files, graph, include_deps)
-        matched_paths = {f.path for f in matched}
-        dep_files = [f for f in resolved if f.path not in matched_paths]
+        matched_paths = {file.path for file in matched}
+        dep_files = [file for file in resolved if file.path not in matched_paths]
 
         if not branch_name:
             slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower())[:40].strip("-")
@@ -70,41 +70,41 @@ class ExtractFilesUseCase:
     def _llm_match(self, prompt, files):
         from src.infrastructure.llm.ollama_backend import build_extraction_prompt, parse_llm_json
         summaries = [
-            {"path": f.path, "status": f.status, "added": f.added, "removed": f.removed}
-            for f in files
+            {"path": file.path, "status": file.status, "added": file.added, "removed": file.removed}
+            for file in files
         ]
         resp = self._llm.query(build_extraction_prompt(prompt, summaries), json_mode=True)
         data = parse_llm_json(resp)
         if data and isinstance(data, dict):
             paths = set(data.get("matched", []))
-            return [f for f in files if f.path in paths]
+            return [file for file in files if file.path in paths]
         return []
 
     def _resolve_deps(self, matched, all_files, graph, include_deps):
         if not include_deps:
             return matched
-        matched_paths = {f.path for f in matched}
-        all_map = {f.path: f for f in all_files}
+        matched_paths = {file.path for file in matched}
+        all_map = {file.path: file for file in all_files}
         deps: set[str] = set()
-        for f in matched:
-            if f.path in graph:
-                for _, dep in nx.dfs_edges(graph, f.path):
+        for file in matched:
+            if file.path in graph:
+                for _, dep in nx.dfs_edges(graph, file.path):
                     if dep not in matched_paths and dep in all_map:
                         deps.add(dep)
         result_paths = matched_paths | deps
-        return [f for f in all_files if f.path in result_paths]
+        return [file for file in all_files if file.path in result_paths]
 
 
 def _build_commands(files, source, base, branch, prompt):
     cmds = [f"git checkout -b {branch} {base}"]
-    checkout = [f.path for f in files if f.status != "D"]
-    deleted = [f.path for f in files if f.status == "D"]
+    checkout = [file.path for file in files if file.status != "D"]
+    deleted = [file.path for file in files if file.status == "D"]
     for i in range(0, len(checkout), 20):
         batch = checkout[i:i+20]
-        args = " ".join(f'"{f}"' for f in batch)
+        args = " ".join(f'"{path}"' for path in batch)
         cmds.append(f"git checkout {source} -- {args}")
     if deleted:
-        args = " ".join(f'"{f}"' for f in deleted)
+        args = " ".join(f'"{path}"' for path in deleted)
         cmds.append(f"git rm {args}")
     cmds.append("git add -A")
     msg = f"Extract: {prompt}"

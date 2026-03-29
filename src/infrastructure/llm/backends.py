@@ -335,13 +335,13 @@ class LlamaCppBackend(LLMBackend):
             # Find .gguf files, prefer smaller quantizations for speed
             gguf_files = sorted(
                 search_dir.rglob("*.gguf"),
-                key=lambda p: (
+                key=lambda gguf: (
                     # Prefer code models
-                    0 if "coder" in p.name.lower() or "code" in p.name.lower() else 1,
+                    0 if "coder" in gguf.name.lower() or "code" in gguf.name.lower() else 1,
                     # Prefer Q4 quantization (good balance)
-                    0 if "q4" in p.name.lower() else 1,
+                    0 if "q4" in gguf.name.lower() else 1,
                     # Prefer smaller files
-                    p.stat().st_size,
+                    gguf.stat().st_size,
                 ),
             )
             if gguf_files:
@@ -483,12 +483,12 @@ def get_llm(
     if backend == "llama-cpp" or backend is None:
         backends_to_try.append(LlamaCppBackend(model_path=model if model and model.endswith(".gguf") else None))
 
-    for b in backends_to_try:
-        if b.is_available():
+    for candidate in backends_to_try:
+        if candidate.is_available():
             if verbose:
-                print(f"  LLM: {b.name} ({b.get_model_name()})", file=sys.stderr)
-            _cached_backend = b
-            return b
+                print(f"  LLM: {candidate.name} ({candidate.get_model_name()})", file=sys.stderr)
+            _cached_backend = candidate
+            return candidate
 
     if verbose:
         print("  LLM: none available (using rule-based analysis)", file=sys.stderr)
@@ -549,9 +549,9 @@ def build_extraction_prompt(
         file_summaries: [{path, status, added, removed, summary}, ...]
     """
     files_text = "\n".join(
-        f"  {f['status']:1s} {f['path']} (+{f['added']}/-{f['removed']})"
-        + (f"  # {f['summary']}" if f.get('summary') else "")
-        for f in file_summaries
+        f"  {entry['status']:1s} {entry['path']} (+{entry['added']}/-{entry['removed']})"
+        + (f"  # {entry['summary']}" if entry.get('summary') else "")
+        for entry in file_summaries
     )
 
     return f"""A developer wants to extract specific files from a feature branch into a separate PR.
@@ -586,10 +586,10 @@ def build_grouping_prompt(
         max_lines: target max code lines per PR (docs exempt)
     """
     files_text = "\n".join(
-        f"  {f['status']:1s} {f['path']} (+{f['added']}/-{f['removed']})"
-        + (f"  [docs]" if f.get('is_docs') else "")
-        + (f"  module={f['module']}" if f.get('module') else "")
-        for f in file_summaries
+        f"  {entry['status']:1s} {entry['path']} (+{entry['added']}/-{entry['removed']})"
+        + (f"  [docs]" if entry.get('is_docs') else "")
+        + (f"  module={entry['module']}" if entry.get('module') else "")
+        for entry in file_summaries
     )
 
     deps_text = "\n".join(f"  {a} → depends on → {b}" for a, b in dependency_edges)
@@ -633,8 +633,8 @@ def build_pr_description_prompt(
     Build a prompt for generating a PR description.
     """
     files_text = "\n".join(
-        f"  {f['status']:1s} {f['path']} (+{f['added']}/-{f['removed']})"
-        for f in files
+        f"  {entry['status']:1s} {entry['path']} (+{entry['added']}/-{entry['removed']})"
+        for entry in files
     )
 
     deps_text = ", ".join(depends_on) if depends_on else "none"

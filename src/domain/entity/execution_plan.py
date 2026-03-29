@@ -35,8 +35,8 @@ class PlanStep:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> PlanStep:
-        return cls(**d)
+    def from_dict(cls, data: dict) -> PlanStep:
+        return cls(**data)
 
 
 @dataclass
@@ -67,8 +67,8 @@ class PRPlan:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> PRPlan:
-        return cls(**d)
+    def from_dict(cls, data: dict) -> PRPlan:
+        return cls(**data)
 
 
 @dataclass
@@ -93,21 +93,21 @@ class ExecutionPlan:
             "base_branch": self.base_branch,
             "repo_root": self.repo_root,
             "total_prs": self.total_prs,
-            "prs": [p.to_dict() for p in self.prs],
-            "steps": [s.to_dict() for s in self.steps],
+            "prs": [pr_plan.to_dict() for pr_plan in self.prs],
+            "steps": [step.to_dict() for step in self.steps],
             "mermaid": self.mermaid,
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> ExecutionPlan:
+    def from_dict(cls, data: dict) -> ExecutionPlan:
         return cls(
-            version=d.get("version", 1),
-            created_at=d.get("created_at", ""),
-            source_branch=d.get("source_branch", ""),
-            base_branch=d.get("base_branch", ""),
-            repo_root=d.get("repo_root", ""),
-            total_prs=d.get("total_prs", 0),
-            prs=[PRPlan.from_dict(p) for p in d.get("prs", [])],
-            steps=[PlanStep.from_dict(s) for s in d.get("steps", [])],
-            mermaid=d.get("mermaid", ""),
+            version=data.get("version", 1),
+            created_at=data.get("created_at", ""),
+            source_branch=data.get("source_branch", ""),
+            base_branch=data.get("base_branch", ""),
+            repo_root=data.get("repo_root", ""),
+            total_prs=data.get("total_prs", 0),
+            prs=[PRPlan.from_dict(pr_data) for pr_data in data.get("prs", [])],
+            steps=[PlanStep.from_dict(step_data) for step_data in data.get("steps", [])],
+            mermaid=data.get("mermaid", ""),
         )

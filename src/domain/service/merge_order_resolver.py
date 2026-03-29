@@ -14,7 +14,7 @@ def compute_merge_order(prs: list[ProposedPR]) -> list[ProposedPR]:
     while remaining:
         ready = [
             pr for pr in remaining
-            if all(d in merged for d in pr.depends_on)
+            if all(dep in merged for dep in pr.depends_on)
         ]
         if not ready:
             result.extend(remaining)
@@ -37,7 +37,7 @@ def compute_waves(prs: list[ProposedPR]) -> list[list[ProposedPR]]:
     while remaining:
         ready = [
             pr for pr in remaining
-            if all(d in merged for d in pr.depends_on)
+            if all(dep in merged for dep in pr.depends_on)
         ]
         if not ready:
             waves.append(remaining[:])
@@ -57,14 +57,14 @@ def compute_pr_dependencies(
     """Set depends_on for each PR based on file-level edges."""
     file_to_pr: dict[str, int] = {}
     for pr in prs:
-        for f in pr.files:
-            file_to_pr[f.path] = pr.index
+        for file in pr.files:
+            file_to_pr[file.path] = pr.index
 
     for pr in prs:
         dep_prs: set[int] = set()
-        for f in pr.files:
+        for file in pr.files:
             for src, tgt in file_edges:
-                if src == f.path:
+                if src == file.path:
                     dep_idx = file_to_pr.get(tgt)
                     if dep_idx and dep_idx != pr.index:
                         dep_prs.add(dep_idx)

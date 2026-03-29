@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from src.infrastructure.complexity.analyzer import LizardSccAnalyzer
+from src.infrastructure.complexity.analyzer import LizardAnalyzer
 
 CACHE_FILE = ".stacker-cache/complexity.json"
 
@@ -24,7 +24,7 @@ def build_complexity_index(
 
     existing = _load_cache(cache_path)
     hashes = _compute_hashes(file_paths)
-    analyzer = LizardSccAnalyzer()
+    analyzer = LizardAnalyzer()
 
     stale_files = []
     result: dict[str, dict] = {}

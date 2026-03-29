@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.domain.entity.symbol_ref import SymbolRef
+
 _TEXT_EXTENSIONS = frozenset({
     ".md", ".txt", ".rst", ".adoc", ".csv", ".json", ".yaml",
     ".yml", ".toml", ".ini", ".cfg", ".lock", ".log",
@@ -22,7 +24,8 @@ class ChangedFile:
     diff_text: str = ""
     complexity: object = None       # FileComplexity, set by enrichment
     symbols_defined: list = field(default_factory=list)
-    symbols_used: set = field(default_factory=set)
+    symbols_used: list[SymbolRef] = field(default_factory=list)
+    structural_ratio: float = 1.0  # 0-1: fraction of structural (non-cosmetic) changes
 
     @property
     def is_text_or_docs(self) -> bool:

@@ -4,44 +4,41 @@ from __future__ import annotations
 
 import os
 
+import lizard
+
 from src.domain.value_object.file_complexity import FileComplexity, FunctionComplexity
 
 
 def analyze_lizard(file_paths: list[str]) -> dict[str, FileComplexity]:
-    """Run lizard on files. Returns empty dict if lizard not installed."""
-    try:
-        import lizard
-    except ImportError:
-        return {}
-
+    """Run lizard on files for per-function complexity metrics."""
     metrics: dict[str, FileComplexity] = {}
     for path in file_paths:
         if not os.path.exists(path):
             continue
-        result = _analyze_single(lizard, path)
+        result = _analyze_single(path)
         if result:
             metrics[path] = result
     return metrics
 
 
-def _analyze_single(lizard, path: str) -> FileComplexity | None:
+def _analyze_single(path: str) -> FileComplexity | None:
     try:
-        analysis = lizard.analyze_file(path)
+        analysis = lizard.analyze_file(path)  # type: ignore[attr-defined]
     except Exception:
         return None
 
     functions = _extract_functions(analysis)
-    total_cc = sum(f.cyclomatic for f in functions)
-    avg_cc = total_cc / len(functions) if functions else 0
-    max_cc = max((f.cyclomatic for f in functions), default=0)
+    total_cyclomatic = sum(func.cyclomatic for func in functions)
+    avg_cyclomatic = total_cyclomatic / len(functions) if functions else 0
+    max_cyclomatic = max((func.cyclomatic for func in functions), default=0)
 
     ext = path.rsplit(".", 1)[-1] if "." in path else ""
     return FileComplexity(
         language=ext, lines=analysis.nloc, code=analysis.nloc,
-        comments=0, blanks=0, complexity=total_cc,
+        comments=0, blanks=0, complexity=total_cyclomatic,
         functions=functions,
-        avg_cyclomatic=round(avg_cc, 1),
-        max_cyclomatic=max_cc,
+        avg_cyclomatic=round(avg_cyclomatic, 1),
+        max_cyclomatic=max_cyclomatic,
     )
 
 

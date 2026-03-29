@@ -16,7 +16,7 @@ def assign_strategies(prs: list[ProposedPR]) -> None:
     depended_on = _find_depended_on(prs)
 
     for pr in prs:
-        all_docs = all(f.is_text_or_docs for f in pr.files)
+        all_docs = all(file.is_text_or_docs for file in pr.files)
         has_dependents = pr.index in depended_on
 
         if has_dependents:

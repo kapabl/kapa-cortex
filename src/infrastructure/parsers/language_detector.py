@@ -36,14 +36,14 @@ _FILENAME_TO_LANG: dict[str, str | None] = {
 
 def detect_language(file_path: str) -> str | None:
     """Detect language from file path. Returns None if unknown."""
-    p = Path(file_path)
+    parsed_path = Path(file_path)
 
-    lang = _FILENAME_TO_LANG.get(p.name)
+    lang = _FILENAME_TO_LANG.get(parsed_path.name)
     if lang is not None:
         return lang if lang else None
 
-    suffixes = "".join(p.suffixes).lower()
+    suffixes = "".join(parsed_path.suffixes).lower()
     if suffixes.endswith(".gradle.kts"):
         return "gradle_kts"
 
-    return _EXT_TO_LANG.get(p.suffix.lower())
+    return _EXT_TO_LANG.get(parsed_path.suffix.lower())

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from src.domain.value_object.symbol_def import SymbolDef
+from src.domain.entity.symbol_def import SymbolDef
 
 
 class SymbolExtractor(ABC):

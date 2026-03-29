@@ -97,7 +97,51 @@ def _install_scc() -> bool:
     if shutil.which("scc"):
         print(f"    {GREEN}✓{RESET} already installed")
         return True
+
+    # Try binary download first (works without Go)
+    if _install_scc_binary():
+        return True
+
+    # Fallback to system package manager
     return _install_system_pkg("scc", "scc")
+
+
+def _install_scc_binary() -> bool:
+    """Download pre-built scc binary from GitHub releases."""
+    import urllib.request
+    import zipfile
+    import tarfile
+    import io
+
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if machine in ("x86_64", "amd64"):
+        arch = "x86_64"
+    elif machine in ("aarch64", "arm64"):
+        arch = "arm64"
+    else:
+        return False
+
+    version = "3.4.0"
+    if system == "darwin":
+        name = f"scc_macOS_{arch}"
+    elif system == "linux":
+        name = f"scc_Linux_{arch}"
+    else:
+        return False
+
+    url = f"https://github.com/boyter/scc/releases/download/v{version}/{name}.tar.gz"
+    try:
+        data = urllib.request.urlopen(url, timeout=30).read()
+        buf = io.BytesIO(data)
+        with tarfile.open(fileobj=buf, mode="r:gz") as tar:
+            tar.extract("scc", path="/usr/local/bin")
+        subprocess.run(["chmod", "+x", "/usr/local/bin/scc"])
+        print(f"    {GREEN}✓{RESET} scc (binary download)")
+        return True
+    except Exception:
+        return False
 
 
 def _install_ast_grep() -> bool:
@@ -143,9 +187,9 @@ def _install_system_pkg(pkg_name: str, binary_name: str) -> bool:
         if shutil.which("dnf"):
             return _run_cmd(f"sudo dnf install -y {pkg_name}", binary_name)
 
-    # Try go install for scc
+    # Try go install for scc (pin version to avoid Go version mismatches)
     if binary_name == "scc" and shutil.which("go"):
-        return _run_cmd("go install github.com/boyter/scc/v3@latest", binary_name)
+        return _run_cmd("go install github.com/boyter/scc/v3@v3.4.0", binary_name)
 
     print(f"    {YELLOW}⊘{RESET} skipped — install manually")
     return False

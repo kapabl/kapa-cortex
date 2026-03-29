@@ -36,8 +36,8 @@ def _print_header(branch, base, total_files, pr_count, graph):
 
 
 def _print_pr(pr):
-    rc = _risk_color(pr.risk_score)
-    print(f"\n  {BOLD}{pr.title}{RESET}  {rc}risk={pr.risk_score}{RESET}")
+    risk_color = _risk_color(pr.risk_score)
+    print(f"\n  {BOLD}{pr.title}{RESET}  {risk_color}risk={pr.risk_score}{RESET}")
     print(f"  {DIM}{'─' * 60}{RESET}")
     if pr.depends_on:
         deps = ", ".join(f"PR #{d}" for d in pr.depends_on)
@@ -48,10 +48,10 @@ def _print_pr(pr):
     print(f"    {DIM}{pr.description}{RESET}")
     print(f"    Code: {pr.total_code_lines}  Total: {pr.total_all_lines}  Cx: {pr.total_complexity}")
     print(f"    Files ({len(pr.files)}):")
-    for f in pr.files:
-        cx = f" cx={f.cyclomatic_complexity}" if f.cyclomatic_complexity else ""
-        doc = f" {DIM}(docs){RESET}" if f.is_text_or_docs else ""
-        print(f"      [{f.status}] {f.path}  (+{f.added}/-{f.removed}){cx}{doc}")
+    for file in pr.files:
+        complexity = f" cx={file.cyclomatic_complexity}" if file.cyclomatic_complexity else ""
+        doc = f" {DIM}(docs){RESET}" if file.is_text_or_docs else ""
+        print(f"      [{file.status}] {file.path}  (+{file.added}/-{file.removed}){complexity}{doc}")
 
 
 def _print_merge_order(prs):
@@ -59,8 +59,8 @@ def _print_merge_order(prs):
     print(f"  {DIM}{'─' * 60}{RESET}")
     for i, pr in enumerate(compute_merge_order(prs), 1):
         deps = f"  (after {', '.join(f'#{d}' for d in pr.depends_on)})" if pr.depends_on else ""
-        rc = _risk_color(pr.risk_score)
-        print(f"  {i}. {pr.title}  [{pr.merge_strategy}] {rc}risk={pr.risk_score}{RESET}{deps}")
+        risk_color = _risk_color(pr.risk_score)
+        print(f"  {i}. {pr.title}  [{pr.merge_strategy}] {risk_color}risk={pr.risk_score}{RESET}{deps}")
 
 
 def _print_waves(prs):

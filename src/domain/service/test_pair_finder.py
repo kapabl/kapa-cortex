@@ -22,15 +22,15 @@ _PATTERNS = [
 
 def find_test_pairs(files: list[ChangedFile]) -> list[TestPair]:
     """Find test-implementation pairs among changed files."""
-    all_paths = {f.path for f in files}
+    all_paths = {file.path for file in files}
     pairs: list[TestPair] = []
 
-    for f in files:
+    for file in files:
         for pattern, replacement in _PATTERNS:
-            if pattern.match(f.path):
-                impl = pattern.sub(replacement, f.path)
-                if impl in all_paths and impl != f.path:
-                    pairs.append(TestPair(f.path, impl))
+            if pattern.match(file.path):
+                impl = pattern.sub(replacement, file.path)
+                if impl in all_paths and impl != file.path:
+                    pairs.append(TestPair(file.path, impl))
                 break
 
     return pairs

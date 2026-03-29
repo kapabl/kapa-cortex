@@ -22,12 +22,12 @@ def _pr_to_dict(pr):
         "title": pr.title,
         "files": [
             {
-                "path": f.path, "status": f.status,
-                "added": f.added, "removed": f.removed,
-                "is_docs": f.is_text_or_docs,
-                "complexity": f.cyclomatic_complexity,
+                "path": file.path, "status": file.status,
+                "added": file.added, "removed": file.removed,
+                "is_docs": file.is_text_or_docs,
+                "complexity": file.cyclomatic_complexity,
             }
-            for f in pr.files
+            for file in pr.files
         ],
         "code_lines": pr.total_code_lines,
         "total_lines": pr.total_all_lines,

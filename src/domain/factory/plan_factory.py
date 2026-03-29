@@ -35,7 +35,7 @@ def create_plan(
         plan.prs.append(PRPlan(
             index=pr.index, title=pr.title,
             branch_name=branch, base_branch=pr_base,
-            files=[f.path for f in pr.files],
+            files=[file.path for file in pr.files],
             depends_on=pr.depends_on,
             merge_strategy=pr.merge_strategy,
             code_lines=pr.total_code_lines,
@@ -69,14 +69,14 @@ def _branch_names(prs, base):
 def _merge_order(prs):
     merged, result, remaining = set(), [], list(prs)
     while remaining:
-        ready = [p for p in remaining if all(d in merged for d in p.depends_on)]
+        ready = [proposed for proposed in remaining if all(dep in merged for dep in proposed.depends_on)]
         if not ready:
             result.extend(remaining)
             break
-        for p in ready:
-            result.append(p)
-            merged.add(p.index)
-            remaining.remove(p)
+        for proposed in ready:
+            result.append(proposed)
+            merged.add(proposed.index)
+            remaining.remove(proposed)
     return result
 
 
@@ -95,15 +95,15 @@ def _add_steps(plan, pr, branch, pr_base, source, remote, create_prs, step_id):
     ))
 
     step_id += 1
-    checkout = [f.path for f in pr.files if f.status != "D"]
-    deleted = [f.path for f in pr.files if f.status == "D"]
+    checkout = [file.path for file in pr.files if file.status != "D"]
+    deleted = [file.path for file in pr.files if file.status == "D"]
     cmds = []
     for i in range(0, len(checkout), 20):
         batch = checkout[i:i + 20]
-        args = " ".join(f'"{f}"' for f in batch)
+        args = " ".join(f'"{path}"' for path in batch)
         cmds.append(f"git checkout {source} -- {args}")
     if deleted:
-        args = " ".join(f'"{f}"' for f in deleted)
+        args = " ".join(f'"{path}"' for path in deleted)
         cmds.append(f"git rm {args}")
     plan.steps.append(PlanStep(
         id=step_id, pr_index=pr.index, phase="checkout",

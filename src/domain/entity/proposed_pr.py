@@ -22,14 +22,14 @@ class ProposedPR:
     @property
     def total_code_lines(self) -> int:
         return sum(
-            f.code_lines for f in self.files
-            if not f.is_text_or_docs
+            file.code_lines for file in self.files
+            if not file.is_text_or_docs
         )
 
     @property
     def total_all_lines(self) -> int:
-        return sum(f.code_lines for f in self.files)
+        return sum(file.code_lines for file in self.files)
 
     @property
     def total_complexity(self) -> int:
-        return sum(f.cyclomatic_complexity for f in self.files)
+        return sum(file.cyclomatic_complexity for file in self.files)

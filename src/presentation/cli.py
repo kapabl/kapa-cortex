@@ -9,9 +9,11 @@ from pathlib import Path
 from src.infrastructure.git.git_client import GitClient
 from src.infrastructure.git.command_executor import ShellCommandRunner
 from src.infrastructure.parsers.multi_lang_parser import MultiLangImportParser, MultiLangSymbolExtractor
-from src.infrastructure.complexity.analyzer import LizardSccAnalyzer
+from src.infrastructure.complexity.cached_analyzer import CachedComplexityAnalyzer
 from src.infrastructure.llm.ollama_backend import OllamaLLMService, NullLLMService, check_llm_backends
 from src.infrastructure.persistence.json_plan_store import JsonPlanStore
+from src.infrastructure.git.cochange_adapter import CachedCochangeProvider
+from src.infrastructure.diff.difftastic_classifier import DifftasticClassifier
 
 from src.application.analyze_branch import AnalyzeBranchUseCase
 from src.application.extract_files import ExtractFilesUseCase
@@ -54,6 +56,13 @@ def main() -> None:
 
     # ── Build dependencies ──
     git = GitClient()
+    if args.base is None:
+        args.base = git.detect_base()
+
+    if args.show_base:
+        print(args.base)
+        return
+
     store = JsonPlanStore(args.plan_file)
     llm = _build_llm(args)
 
@@ -65,9 +74,9 @@ def main() -> None:
     # ── Run plan ──
     if args.run_plan:
         runner = ShellCommandRunner()
-        uc = ExecutePlanUseCase(runner, store)
-        ok = uc.execute(store.load(), step_id=args.step, dry_run=args.dry_run)
-        sys.exit(0 if ok else 1)
+        execute_use_case = ExecutePlanUseCase(runner, store)
+        success = execute_use_case.execute(store.load(), step_id=args.step, dry_run=args.dry_run)
+        sys.exit(0 if success else 1)
 
     # ── Extract ──
     if args.extract:
@@ -125,45 +134,47 @@ def main() -> None:
 
 
 def _parse_args():
-    p = argparse.ArgumentParser(description="Split branches into stacked PRs.")
+    arg_parser = argparse.ArgumentParser(description="Split branches into stacked PRs.")
 
-    p.add_argument("--base", default="main")
-    p.add_argument("--max-files", type=int, default=3)
-    p.add_argument("--max-lines", type=int, default=200)
+    arg_parser.add_argument("--base", default=None)
+    arg_parser.add_argument("--max-files", type=int, default=3)
+    arg_parser.add_argument("--max-lines", type=int, default=200)
 
-    p.add_argument("--json", action="store_true")
-    p.add_argument("--visualize", action="store_true")
-    p.add_argument("--dot-file", type=str)
+    arg_parser.add_argument("--json", action="store_true")
+    arg_parser.add_argument("--visualize", action="store_true")
+    arg_parser.add_argument("--dot-file", type=str)
 
-    p.add_argument("--generate-plan", action="store_true")
-    p.add_argument("--check-plan", action="store_true")
-    p.add_argument("--run-plan", action="store_true")
-    p.add_argument("--step", type=int, default=None)
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--print-commands", action="store_true")
-    p.add_argument("--shell-script", action="store_true")
-    p.add_argument("--no-gh", action="store_true")
-    p.add_argument("--plan-file", default=".stacked-pr-plan.json")
+    arg_parser.add_argument("--generate-plan", action="store_true")
+    arg_parser.add_argument("--check-plan", action="store_true")
+    arg_parser.add_argument("--run-plan", action="store_true")
+    arg_parser.add_argument("--step", type=int, default=None)
+    arg_parser.add_argument("--dry-run", action="store_true")
+    arg_parser.add_argument("--print-commands", action="store_true")
+    arg_parser.add_argument("--shell-script", action="store_true")
+    arg_parser.add_argument("--no-gh", action="store_true")
+    arg_parser.add_argument("--plan-file", default=".stacked-pr-plan.json")
 
-    p.add_argument("--extract", type=str, metavar="PROMPT")
-    p.add_argument("--extract-branch", type=str)
-    p.add_argument("--no-deps", action="store_true")
+    arg_parser.add_argument("--extract", type=str, metavar="PROMPT")
+    arg_parser.add_argument("--extract-branch", type=str)
+    arg_parser.add_argument("--no-deps", action="store_true")
 
     # AI is ON by default. Use --no-ai to disable.
-    p.add_argument("--no-ai", action="store_true", help="Disable local LLM")
-    p.add_argument("--ai-backend", type=str, choices=["ollama", "llama-cpp", "none"])
-    p.add_argument("--ai-model", type=str)
-    p.add_argument("--ai-pull", action="store_true")
-    p.add_argument("--ai-check", action="store_true")
+    arg_parser.add_argument("--no-ai", action="store_true", help="Disable local LLM")
+    arg_parser.add_argument("--ai-backend", type=str, choices=["ollama", "llama-cpp", "none"])
+    arg_parser.add_argument("--ai-model", type=str)
+    arg_parser.add_argument("--ai-pull", action="store_true")
+    arg_parser.add_argument("--ai-check", action="store_true")
+    arg_parser.add_argument("--show-base", action="store_true",
+                   help="Print detected base branch and exit")
 
-    p.add_argument("--setup", action="store_true",
+    arg_parser.add_argument("--setup", action="store_true",
                    help="Install all deps (ollama, ctags, scc, ast-grep, lizard)")
-    p.add_argument("--setup-minimal", action="store_true",
+    arg_parser.add_argument("--setup-minimal", action="store_true",
                    help="Setup with smallest LLM model")
-    p.add_argument("--index", action="store_true",
+    arg_parser.add_argument("--index", action="store_true",
                    help="Pre-compute caches (ctags, imports, co-change, complexity)")
 
-    return p.parse_args()
+    return arg_parser.parse_args()
 
 
 def _build_llm(args):
@@ -175,10 +186,12 @@ def _build_llm(args):
 def _run_analysis(args, git, llm):
     parser = MultiLangImportParser()
     symbols = MultiLangSymbolExtractor()
-    complexity = LizardSccAnalyzer()
-    uc = AnalyzeBranchUseCase(git, parser, symbols, complexity, llm)
+    complexity = CachedComplexityAnalyzer()
+    cochange = CachedCochangeProvider()
+    diff_classifier = DifftasticClassifier()
+    analyze_use_case = AnalyzeBranchUseCase(git, parser, symbols, complexity, llm, cochange, diff_classifier)
     print(f"Analyzing...", file=sys.stderr)
-    return uc.execute(args.base, args.max_files, args.max_lines)
+    return analyze_use_case.execute(args.base, args.max_files, args.max_lines)
 
 
 def _run_extraction(args, git, llm):
@@ -186,26 +199,26 @@ def _run_extraction(args, git, llm):
     files = git.diff_stat(base_ref)
     parser = MultiLangImportParser()
     symbols = MultiLangSymbolExtractor()
-    complexity = LizardSccAnalyzer()
+    complexity = CachedComplexityAnalyzer()
 
     # Quick enrichment for extraction
     import networkx as nx
     from src.domain.service.dependency_resolver import build_dependency_edges
     imports_by_file = {}
-    for f in files:
-        source = git.file_source(f.path)
+    for file in files:
+        source = git.file_source(file.path)
         if source:
-            imports_by_file[f.path] = parser.parse(f.path, source)
+            imports_by_file[file.path] = parser.parse(file.path, source)
     edges = build_dependency_edges(files, imports_by_file)
-    G = nx.DiGraph()
-    for f in files:
-        G.add_node(f.path)
-    for s, t, _, _ in edges:
-        G.add_edge(s, t)
+    dep_graph = nx.DiGraph()
+    for file in files:
+        dep_graph.add_node(file.path)
+    for src, dst, _, _ in edges:
+        dep_graph.add_edge(src, dst)
 
-    uc = ExtractFilesUseCase(llm)
-    return uc.execute(
-        prompt=args.extract, all_files=files, graph=G,
+    extract_use_case = ExtractFilesUseCase(llm)
+    return extract_use_case.execute(
+        prompt=args.extract, all_files=files, graph=dep_graph,
         source_branch=git.current_branch(), base_branch=args.base,
         branch_name=args.extract_branch, include_deps=not args.no_deps,
     )

@@ -14,6 +14,17 @@ class GitClient(GitReader):
     def current_branch(self) -> str:
         return self._run("rev-parse", "--abbrev-ref", "HEAD")
 
+    def detect_base(self) -> str:
+        """Auto-detect the base branch (main, master, develop)."""
+        for candidate in ("main", "master", "develop"):
+            for ref in (candidate, f"origin/{candidate}"):
+                try:
+                    self._run("rev-parse", "--verify", ref)
+                    return candidate
+                except RuntimeError:
+                    continue
+        return "main"
+
     def resolve_base(self, base: str) -> str:
         for ref in [base, f"origin/{base}"]:
             try:
@@ -37,11 +48,6 @@ class GitClient(GitReader):
     def diff_stat(self, base_ref: str) -> list[ChangedFile]:
         mb = self.merge_base(base_ref)
         return self._parse_diff(mb)
-
-    def cochange_history(
-        self, paths: list[str], max_commits: int = 200,
-    ) -> dict[tuple[str, str], int]:
-        return _analyze_cochange(paths, max_commits)
 
     def _run(self, *args: str) -> str:
         result = subprocess.run(
@@ -92,43 +98,3 @@ class GitClient(GitReader):
             return ""
 
 
-def _analyze_cochange(
-    paths: list[str], max_commits: int,
-) -> dict[tuple[str, str], int]:
-    """Analyze git log for files that change together."""
-    try:
-        result = subprocess.run(
-            ["git", "log", f"--max-count={max_commits}",
-             "--name-only", "--format="],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode != 0:
-            return {}
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return {}
-
-    path_set = set(paths)
-    cochange: dict[tuple[str, str], int] = {}
-    current_commit_files: list[str] = []
-
-    for line in result.stdout.splitlines():
-        if not line.strip():
-            _count_pairs(current_commit_files, path_set, cochange)
-            current_commit_files = []
-        elif line.strip() in path_set:
-            current_commit_files.append(line.strip())
-
-    _count_pairs(current_commit_files, path_set, cochange)
-    return cochange
-
-
-def _count_pairs(
-    files: list[str],
-    path_set: set[str],
-    cochange: dict[tuple[str, str], int],
-) -> None:
-    relevant = [f for f in files if f in path_set]
-    for i, a in enumerate(relevant):
-        for b in relevant[i + 1:]:
-            pair = tuple(sorted([a, b]))
-            cochange[pair] = cochange.get(pair, 0) + 1

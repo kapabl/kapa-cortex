@@ -19,6 +19,13 @@
 - One responsibility per method/function.
 - If you can't name it clearly in 3 words, it's doing too much. Split it.
 
+## Variable Names
+
+- **No single-letter or two-letter variable names.** Exception: `i`, `j`, `k` for loop indices.
+- Names must be descriptive: `analyze_use_case`, not `uc`. `graph`, not `G`.
+- Bad: `f`, `pr`, `tp`, `G`, `uc`, `rp`, `ag`, `ts`.
+- Good: `changed_file`, `proposed_pr`, `test_pair`, `dep_graph`, `analyze_use_case`.
+
 ## Function Rules
 
 - **Max 3 parameters.** Use dataclasses or config objects when more are needed.
@@ -67,6 +74,21 @@ tests/
 - Infrastructure layer imports from domain (to implement interfaces).
 - Presentation layer imports from application and domain.
 - Never import upward through layers.
+
+## Code Navigation (mandatory for all agents and sub-agents)
+
+ALWAYS use local CLI tools instead of reading files. Do not burn tokens on what the CPU can do.
+These run on the local CPU — faster, cheaper, and more precise.
+
+1. `ctags` for symbol indexing — finds definitions and their files in one shot.
+2. `ast-grep` for structural code search — pattern matching over ASTs.
+3. `fd` for filename/pattern search. Never use `find`.
+4. `scc` or `lizard` for repo shape and metrics. Never hand-count or guess.
+5. `rg` (ripgrep) as last resort for unstructured text search. Never use `grep`.
+
+At the end of code nagivation generate a report with each tool used, what you searched for, and what you found. This will be crucial for debugging and improving the agent's code navigation skills over time. Also the report should include false positives( files, lines, or symbols that were returned but turned out to be irrelevant) and false negatives (files, lines, or symbols that were relevant but were not returned by the search). This will help in refining the search queries and improving the accuracy of the tools used.
+
+Only read files when you need full context after narrowing down with the tools above.
 
 ## General
 

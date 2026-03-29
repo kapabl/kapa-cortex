@@ -7,6 +7,7 @@ import os
 import networkx as nx
 
 from src.domain.entity.changed_file import ChangedFile
+from src.domain.entity.symbol_ref import SymbolRef
 from src.domain.entity.proposed_pr import ProposedPR
 from src.domain.service.dependency_resolver import build_dependency_edges
 from src.domain.factory.pr_set_factory import partition
@@ -20,6 +21,8 @@ from src.domain.port.import_parser import ImportParser
 from src.domain.port.symbol_extractor import SymbolExtractor
 from src.domain.port.complexity_analyzer import ComplexityAnalyzer
 from src.domain.port.llm_service import LLMService
+from src.domain.port.cochange_provider import CochangeProvider
+from src.domain.port.diff_classifier import DiffClassifier
 
 
 class AnalyzeBranchUseCase:
@@ -32,12 +35,16 @@ class AnalyzeBranchUseCase:
         symbols: SymbolExtractor,
         complexity: ComplexityAnalyzer,
         llm: LLMService,
+        cochange: CochangeProvider,
+        diff_classifier: DiffClassifier,
     ):
         self._git = git
         self._parser = parser
         self._symbols = symbols
         self._complexity = complexity
         self._llm = llm
+        self._cochange = cochange
+        self._diff_classifier = diff_classifier
 
     def execute(
         self,
@@ -56,8 +63,8 @@ class AnalyzeBranchUseCase:
         imports_by_file = self._parse_imports(files)
         edges = build_dependency_edges(files, imports_by_file)
 
-        G = self._build_graph(files, edges)
-        topo = self._topo_sort(G)
+        dep_graph = self._build_graph(files, edges)
+        topo = self._topo_sort(dep_graph)
         affinity = self._cochange_affinity(files)
         test_pairs = find_test_pairs(files)
 
@@ -72,71 +79,76 @@ class AnalyzeBranchUseCase:
 
         assign_strategies(prs)
 
-        return AnalysisResult(branch=branch, base=base, files=files, prs=prs, graph=G)
+        return AnalysisResult(branch=branch, base=base, files=files, prs=prs, graph=dep_graph)
 
     def _enrich(self, files: list[ChangedFile]) -> None:
-        paths = [f.path for f in files if not f.is_text_or_docs]
-        existing = [p for p in paths if os.path.exists(p)]
+        paths = [file.path for file in files if not file.is_text_or_docs]
+        existing = [path for path in paths if os.path.exists(path)]
         if existing:
             metrics = self._complexity.analyze(existing)
-            for f in files:
-                if f.path in metrics:
-                    f.complexity = metrics[f.path]
+            for file in files:
+                if file.path in metrics:
+                    file.complexity = metrics[file.path]
 
-        for f in files:
-            if f.is_text_or_docs:
+        for file in files:
+            if file.is_text_or_docs:
                 continue
-            source = self._git.file_source(f.path)
+            source = self._git.file_source(file.path)
             if source:
-                f.symbols_defined = self._symbols.extract(f.path, source)
+                file.symbols_defined = self._symbols.extract(file.path, source)
                 added = "\n".join(
-                    line[1:] for line in f.diff_text.splitlines()
+                    line[1:] for line in file.diff_text.splitlines()
                     if line.startswith("+") and not line.startswith("+++")
                 )
-                f.symbols_used = {s.name for s in self._symbols.extract(f.path, added)}
+                file.symbols_used = [
+                    SymbolRef(name=s.name, kind=s.kind)
+                    for s in self._symbols.extract(file.path, added)
+                ]
+            if file.diff_text:
+                file.structural_ratio = self._diff_classifier.structural_ratio(file.path, file.diff_text)
 
     def _parse_imports(self, files: list[ChangedFile]) -> dict[str, list]:
         result = {}
-        for f in files:
+        for file in files:
             added_lines = {
                 line[1:].strip()
-                for line in f.diff_text.splitlines()
+                for line in file.diff_text.splitlines()
                 if line.startswith("+") and not line.startswith("+++")
             }
-            source = self._git.file_source(f.path)
+            source = self._git.file_source(file.path)
             if not source:
                 source = "\n".join(added_lines)
-            all_imports = self._parser.parse(f.path, source)
-            result[f.path] = [
+            all_imports = self._parser.parse(file.path, source)
+            result[file.path] = [
                 imp for imp in all_imports
                 if any(imp.raw in al for al in added_lines) or not added_lines
             ]
         return result
 
     def _build_graph(self, files, edges):
-        G = nx.DiGraph()
-        for f in files:
-            G.add_node(f.path, file=f)
+        dep_graph = nx.DiGraph()
+        for file in files:
+            dep_graph.add_node(file.path, file=file)
         for src, tgt, kind, weight in edges:
-            G.add_edge(src, tgt, kind=kind, weight=weight)
-        while not nx.is_directed_acyclic_graph(G):
+            dep_graph.add_edge(src, tgt, kind=kind, weight=weight)
+        while not nx.is_directed_acyclic_graph(dep_graph):
             try:
-                cycle = nx.find_cycle(G)
-                weakest = min(cycle, key=lambda e: G.edges[e[0], e[1]].get("weight", 1.0))
-                G.remove_edge(weakest[0], weakest[1])
+                cycle = nx.find_cycle(dep_graph)
+                weakest = min(cycle, key=lambda e: dep_graph.edges[e[0], e[1]].get("weight", 1.0))
+                dep_graph.remove_edge(weakest[0], weakest[1])
             except nx.NetworkXNoCycle:
                 break
-        return G
+        return dep_graph
 
-    def _topo_sort(self, G):
+    def _topo_sort(self, dep_graph):
         try:
-            return list(nx.topological_sort(G))
+            return list(nx.topological_sort(dep_graph))
         except nx.NetworkXUnfeasible:
-            return sorted(G.nodes(), key=lambda n: -G.in_degree(n))
+            return sorted(dep_graph.nodes(), key=lambda n: -dep_graph.in_degree(n))
 
     def _cochange_affinity(self, files):
-        paths = [f.path for f in files]
-        cochange = self._git.cochange_history(paths)
+        paths = [file.path for file in files]
+        cochange = self._cochange.cochange_history(paths)
         if not cochange:
             return {}
         max_count = max(cochange.values()) or 1

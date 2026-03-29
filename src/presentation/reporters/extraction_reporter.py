@@ -19,17 +19,17 @@ def print_extraction(result: ExtractionResult) -> None:
 
     if result.rules:
         print(f"\n  {BOLD}Rules:{RESET}")
-        for r in result.rules:
-            print(f"    [{r.kind:12s}] {r.pattern}")
+        for rule in result.rules:
+            print(f"    [{rule.kind:12s}] {rule.pattern}")
 
     print(f"\n  {BOLD}Matched ({len(result.matched_files)}):{RESET}")
-    for f in result.matched_files:
-        print(f"    [{f.status}] {f.path}  (+{f.added}/-{f.removed})")
+    for file in result.matched_files:
+        print(f"    [{file.status}] {file.path}  (+{file.added}/-{file.removed})")
 
     if result.dep_files:
         print(f"\n  {BOLD}Dependencies ({len(result.dep_files)}):{RESET}")
-        for f in result.dep_files:
-            print(f"    [{f.status}] {f.path}  {DIM}(dep){RESET}")
+        for file in result.dep_files:
+            print(f"    [{file.status}] {file.path}  {DIM}(dep){RESET}")
 
     print(f"\n  {BOLD}Commands:{RESET}")
     for cmd in result.commands:

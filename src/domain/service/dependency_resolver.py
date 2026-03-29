@@ -6,8 +6,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from src.domain.entity.changed_file import ChangedFile
-from src.domain.value_object.import_ref import ImportRef
-from src.domain.value_object.symbol_def import SymbolDef
+from src.domain.entity.import_ref import ImportRef
+from src.domain.entity.symbol_def import SymbolDef
 
 
 def build_dependency_edges(
@@ -31,14 +31,14 @@ def build_dependency_edges(
 def _build_module_index(files: list[ChangedFile]) -> dict[str, str]:
     """Map module-like keys to file paths."""
     index: dict[str, str] = {}
-    for f in files:
-        mod = _path_to_module(f.path)
-        index[mod] = f.path
+    for file in files:
+        mod = _path_to_module(file.path)
+        index[mod] = file.path
         short = mod.rsplit(".", 1)[-1]
-        index.setdefault(short, f.path)
-        dir_mod = _path_to_module(str(Path(f.path).parent))
+        index.setdefault(short, file.path)
+        dir_mod = _path_to_module(str(Path(file.path).parent))
         if dir_mod and dir_mod != ".":
-            index.setdefault(dir_mod, f.path)
+            index.setdefault(dir_mod, file.path)
     return index
 
 
@@ -47,9 +47,9 @@ def _build_symbol_index(
 ) -> dict[str, set[str]]:
     """Map symbol names to file paths that define them."""
     index: defaultdict[str, set[str]] = defaultdict(set)
-    for f in files:
-        for sym in f.symbols_defined:
-            index[sym.name].add(f.path)
+    for file in files:
+        for sym in file.symbols_defined:
+            index[sym.name].add(file.path)
     return dict(index)
 
 
@@ -60,12 +60,12 @@ def _import_edges(
 ) -> list[tuple[str, str, str, float]]:
     """Edges from import analysis."""
     edges = []
-    for f in files:
-        for imp in imports_by_file.get(f.path, []):
+    for file in files:
+        for imp in imports_by_file.get(file.path, []):
             norm = _normalize_import(imp.module)
-            target = _resolve_target(norm, f.path, module_index)
+            target = _resolve_target(norm, file.path, module_index)
             if target:
-                edges.append((f.path, target, "import", 1.0))
+                edges.append((file.path, target, "import", 1.0))
     return edges
 
 
@@ -75,11 +75,11 @@ def _symbol_edges(
 ) -> list[tuple[str, str, str, float]]:
     """Edges from symbol usage analysis."""
     edges = []
-    for f in files:
-        for sym_name in f.symbols_used:
-            for provider in symbol_index.get(sym_name, set()):
-                if provider != f.path:
-                    edges.append((f.path, provider, "symbol", 0.8))
+    for file in files:
+        for ref in file.symbols_used:
+            for provider in symbol_index.get(ref.name, set()):
+                if provider != file.path:
+                    edges.append((file.path, provider, "symbol", 0.8))
     return edges
 
 
@@ -102,5 +102,5 @@ def _normalize_import(raw: str) -> str:
 
 
 def _path_to_module(path: str) -> str:
-    p = Path(path).with_suffix("")
-    return str(p).replace("/", ".").replace("\\", ".")
+    module_path = Path(path).with_suffix("")
+    return str(module_path).replace("/", ".").replace("\\", ".")

@@ -11,8 +11,8 @@ class TestChangedFile(unittest.TestCase):
         self.assertFalse(ChangedFile("main.py", 10, 0, "M").is_text_or_docs)
 
     def test_code_lines(self):
-        f = ChangedFile("a.py", added=30, removed=10, status="M")
-        self.assertEqual(f.code_lines, 40)
+        changed_file = ChangedFile("a.py", added=30, removed=10, status="M")
+        self.assertEqual(changed_file.code_lines, 40)
 
     def test_module_key(self):
         self.assertEqual(ChangedFile("src/foo.py", 1, 0, "M").module_key, "src")

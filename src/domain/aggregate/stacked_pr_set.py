@@ -43,4 +43,4 @@ class StackedPRSet:
         self.events.append(DependencyCycleDetected(files_in_cycle))
 
     def get_pr(self, index: int) -> ProposedPR | None:
-        return next((p for p in self.prs if p.index == index), None)
+        return next((proposed_pr for proposed_pr in self.prs if proposed_pr.index == index), None)

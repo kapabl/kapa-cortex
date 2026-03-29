@@ -15,26 +15,26 @@ def match_files(
     rules: list[ExtractionRule],
 ) -> list[ChangedFile]:
     """Return files that match at least one rule."""
-    return [f for f in files if _matches_any(f, rules)]
+    return [file for file in files if _matches_any(file, rules)]
 
 
-def _matches_any(f: ChangedFile, rules: list[ExtractionRule]) -> bool:
-    return any(_matches(f, r) for r in rules)
+def _matches_any(file: ChangedFile, rules: list[ExtractionRule]) -> bool:
+    return any(_matches(file, r) for r in rules)
 
 
-def _matches(f: ChangedFile, rule: ExtractionRule) -> bool:
+def _matches(file: ChangedFile, rule: ExtractionRule) -> bool:
     if rule.kind == "glob":
         return (
-            fnmatch.fnmatch(f.path, rule.pattern)
-            or fnmatch.fnmatch(Path(f.path).name, rule.pattern)
+            fnmatch.fnmatch(file.path, rule.pattern)
+            or fnmatch.fnmatch(Path(file.path).name, rule.pattern)
         )
     if rule.kind == "path_prefix":
-        return f.path.startswith(rule.pattern)
+        return file.path.startswith(rule.pattern)
     if rule.kind == "ext":
-        return Path(f.path).suffix.lower() == rule.pattern
+        return Path(file.path).suffix.lower() == rule.pattern
     if rule.kind == "regex":
-        return bool(re.search(rule.pattern, f.path))
+        return bool(re.search(rule.pattern, file.path))
     if rule.kind == "keyword":
         kw = rule.pattern.lower()
-        return kw in f.path.lower() or kw in f.diff_text.lower()
+        return kw in file.path.lower() or kw in file.diff_text.lower()
     return False

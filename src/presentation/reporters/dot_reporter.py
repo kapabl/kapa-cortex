@@ -9,7 +9,7 @@ def generate_dot(prs):
 
     for pr in prs:
         color = colors.get(pr.merge_strategy, "#999")
-        file_list = "\\n".join(f.path for f in pr.files[:5])
+        file_list = "\\n".join(file.path for file in pr.files[:5])
         if len(pr.files) > 5:
             file_list += f"\\n... +{len(pr.files) - 5} more"
         label = f"{pr.title}\\n{file_list}\\n[{pr.merge_strategy}] risk={pr.risk_score}"

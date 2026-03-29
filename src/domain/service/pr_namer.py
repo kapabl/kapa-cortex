@@ -38,23 +38,23 @@ def generate_title(files: list[ChangedFile]) -> str:
 
 
 def _all_docs(files: list[ChangedFile]) -> bool:
-    return all(f.is_text_or_docs for f in files)
+    return all(file.is_text_or_docs for file in files)
 
 
 def _all_deleted(files: list[ChangedFile]) -> bool:
-    return all(f.status == "D" for f in files)
+    return all(file.status == "D" for file in files)
 
 
 def _all_tests(files: list[ChangedFile]) -> bool:
     test_indicators = {"test_", "_test.", ".test.", ".spec.", "Test."}
     return all(
-        any(ind in f.path for ind in test_indicators)
-        for f in files
+        any(ind in file.path for ind in test_indicators)
+        for file in files
     )
 
 
 def _docs_title(files: list[ChangedFile]) -> str:
-    names = [Path(f.path).stem for f in files[:2]]
+    names = [Path(file.path).stem for file in files[:2]]
     return f"Update {', '.join(names)} docs"
 
 
@@ -90,8 +90,8 @@ def _module_title(files: list[ChangedFile]) -> str:
 def _extract_new_symbols(files: list[ChangedFile]) -> list[str]:
     """Extract class/function names from added lines."""
     symbols: list[str] = []
-    for f in files:
-        for line in f.diff_text.splitlines():
+    for file in files:
+        for line in file.diff_text.splitlines():
             if not line.startswith("+") or line.startswith("+++"):
                 continue
             clean = line[1:].strip()
@@ -115,14 +115,14 @@ def _parse_symbol_from_line(line: str) -> str | None:
 
 def _top_modules(files: list[ChangedFile]) -> list[str]:
     modules: list[str] = []
-    for f in files:
-        mod = f.module_key
+    for file in files:
+        mod = file.module_key
         if mod == "__root__":
-            mod = Path(f.path).stem
+            mod = Path(file.path).stem
         if mod not in modules:
             modules.append(mod)
     return modules[:3]
 
 
 def _has_new_files(files: list[ChangedFile]) -> bool:
-    return any(f.status == "A" for f in files)
+    return any(file.status == "A" for file in files)
