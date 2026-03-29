@@ -143,8 +143,17 @@ def _cmd_impact(args):
         print(f"  {RED}Provide a file or --symbol NAME{RESET}")
         sys.exit(1)
 
-    if args.symbol and args.files:
-        # --symbol + --files: file-level impact from the symbol's file
+    if args.symbol and args.calls and args.files:
+        # --symbol --calls --files: combined view
+        call_data = _query_or_local("calls", {"target": args.symbol})
+        file_data = _query_or_local("symbol_file_impact", {"target": args.symbol})
+        if args.json:
+            print(json_mod.dumps({"calls": call_data, "files": file_data}, indent=2))
+        else:
+            _print_symbol_impact(call_data)
+            _print_file_impact(file_data)
+    elif args.symbol and args.files:
+        # --symbol --files: file-level impact from the symbol's file
         data = _query_or_local("symbol_file_impact", {"target": args.symbol})
         if args.json:
             print(json_mod.dumps(data, indent=2))
