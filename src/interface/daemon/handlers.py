@@ -44,14 +44,102 @@ def handle_analyze(params: dict) -> dict:
     return build_json(result.prs, result.branch, base, result.graph)
 
 
+def handle_impact(params: dict) -> dict:
+    """Find files affected by changes to a target file."""
+    from src.domain.service.graph_queries import find_impact
+
+    target = params.get("target")
+    if not target:
+        raise ValueError("Missing 'target' parameter")
+
+    store = _get_index_store()
+    result = find_impact(target, store.get_dependents)
+    return {
+        "query": "impact",
+        "target": result.target,
+        "direct": result.direct,
+        "transitive": result.transitive,
+        "total_affected": result.total_affected,
+    }
+
+
+def handle_deps(params: dict) -> dict:
+    """Find transitive dependencies of a target file."""
+    from src.domain.service.graph_queries import find_deps
+
+    target = params.get("target")
+    if not target:
+        raise ValueError("Missing 'target' parameter")
+
+    store = _get_index_store()
+    deps = find_deps(target, store.get_dependencies)
+    return {
+        "query": "deps",
+        "target": target,
+        "dependencies": deps,
+        "total": len(deps),
+    }
+
+
+def handle_hotspots(params: dict) -> dict:
+    """Find riskiest files — high complexity + many dependents."""
+    from src.domain.service.graph_queries import find_hotspots
+
+    limit = params.get("limit", 20)
+    store = _get_index_store()
+
+    results = find_hotspots(
+        list(store.files.keys()),
+        get_complexity=lambda path: store.files[path].complexity if path in store.files else 0,
+        get_dependents=store.get_dependents,
+        limit=limit,
+    )
+    return {
+        "query": "hotspots",
+        "hotspots": [
+            {"path": entry.path, "complexity": entry.complexity,
+             "dependents": entry.dependent_count, "score": round(entry.score, 1)}
+            for entry in results
+        ],
+    }
+
+
 def handle_status(params: dict) -> dict:
     """Return daemon status."""
-    return {"running": True, "lsp_servers": []}
+    store = _get_index_store()
+    return {
+        "running": True,
+        "index_files": store.file_count if store else 0,
+        "index_symbols": store.symbol_count if store else 0,
+        "index_edges": store.edge_count if store else 0,
+    }
+
+
+# Module-level index store — shared across handlers in daemon process
+_index_store: "IndexStore | None" = None
+
+
+def set_index_store(store) -> None:
+    """Set the shared index store (called by daemon on boot)."""
+    global _index_store
+    _index_store = store
+
+
+def _get_index_store():
+    """Get the shared index store."""
+    from src.infrastructure.indexer.index_store import IndexStore
+    global _index_store
+    if _index_store is None:
+        _index_store = IndexStore()
+    return _index_store
 
 
 def build_handler_map() -> dict:
     """Build action → handler mapping for the query router."""
     return {
         "analyze": handle_analyze,
+        "impact": handle_impact,
+        "deps": handle_deps,
+        "hotspots": handle_hotspots,
         "status": handle_status,
     }
