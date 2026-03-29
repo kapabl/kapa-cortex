@@ -113,7 +113,13 @@ def _cmd_scan(args):
         store.save(cache_path)
         print(f"  Built index: {store.file_count} files", file=sys.stderr)
 
-    if args.hotspots:
+    target = getattr(args, "file", None)
+
+    if target:
+        # Default: impact analysis when a file is given
+        _print_impact(find_impact(target, store.get_dependents), args.json, json_mod)
+
+    elif args.hotspots:
         results = find_hotspots(
             list(store.files.keys()),
             get_complexity=lambda path: store.files[path].complexity if path in store.files else 0,
@@ -128,28 +134,7 @@ def _cmd_scan(args):
         else:
             print(f"\n  {BOLD}Hotspots (complexity × dependents):{RESET}")
             for index, entry in enumerate(results, 1):
-                print(f"  {index:3d}. {entry.path}  cx={entry.complexity}  deps={entry.dependent_count}  score={entry.score:.0f}")
-            print()
-
-    elif args.impact:
-        result = find_impact(args.impact, store.get_dependents)
-        if args.json:
-            print(json_mod.dumps({
-                "target": result.target,
-                "direct": result.direct,
-                "transitive": result.transitive,
-                "total_affected": result.total_affected,
-            }, indent=2))
-        else:
-            print(f"\n  {BOLD}Impact of {CYAN}{result.target}{RESET}:")
-            print(f"  Direct ({len(result.direct)}):")
-            for path in result.direct:
-                print(f"    {path}")
-            if result.transitive:
-                print(f"  Transitive ({len(result.transitive)}):")
-                for path in result.transitive:
-                    print(f"    {path}")
-            print(f"\n  Total affected: {result.total_affected}")
+                print(f"  {index:3d}. {entry.path}  cx={entry.complexity}  dependents={entry.dependent_count}  score={entry.score:.0f}")
             print()
 
     elif args.deps:
@@ -185,6 +170,31 @@ def _cmd_scan(args):
             for lang, count in sorted(languages.items(), key=lambda item: item[1], reverse=True):
                 print(f"    {lang:15s} {count}")
             print()
+
+
+def _print_impact(result, use_json, json_mod):
+    """Print impact analysis result."""
+    if use_json:
+        print(json_mod.dumps({
+            "target": result.target,
+            "direct": result.direct,
+            "transitive": result.transitive,
+            "total_affected": result.total_affected,
+        }, indent=2))
+    else:
+        print(f"\n  {BOLD}Impact of {CYAN}{result.target}{RESET}:")
+        if result.direct:
+            print(f"  Direct ({len(result.direct)}):")
+            for path in result.direct:
+                print(f"    {path}")
+        if result.transitive:
+            print(f"  Transitive ({len(result.transitive)}):")
+            for path in result.transitive:
+                print(f"    {path}")
+        print(f"\n  Total affected: {result.total_affected}")
+        if result.total_affected == 0:
+            print(f"  {DIM}No files depend on this file.{RESET}")
+        print()
 
 
 def _cmd_analyze(args):
@@ -342,10 +352,10 @@ def _parse_args():
     index_parser.set_defaults(func=_cmd_index)
 
     # ── scan ──
-    scan_parser = subparsers.add_parser("scan", help="Pure repo analysis — hotspots, deps, impact")
+    scan_parser = subparsers.add_parser("scan", help="Repo analysis — impact, hotspots, deps")
+    scan_parser.add_argument("file", nargs="?", default=None, help="File to analyze impact (what breaks if this changes)")
     scan_parser.add_argument("--hotspots", action="store_true", help="Rank files by complexity × dependents")
-    scan_parser.add_argument("--impact", type=str, metavar="FILE", help="Show files affected by changes to FILE")
-    scan_parser.add_argument("--deps", type=str, metavar="FILE", help="Show dependency chain of FILE")
+    scan_parser.add_argument("--deps", type=str, metavar="FILE", help="Show what FILE depends on (forward)")
     scan_parser.add_argument("--limit", type=int, default=20, help="Max results for hotspots")
     scan_parser.add_argument("--json", action="store_true", help="JSON output")
     scan_parser.set_defaults(func=_cmd_scan)
