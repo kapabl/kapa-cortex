@@ -9,6 +9,7 @@ description = "Local code intelligence engine — stacked PRs, repo analysis, de
 requires-python = ">=3.10"
 dependencies = [
     "networkx>=3.0",
+    "msgpack>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +21,10 @@ full = [
 ]
 
 [project.scripts]
-kapa-cortex = "src.presentation.cli:main"
+kapa-cortex = "src.interface.cli.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
+
+[tool.setuptools.package-data]
+"src.interface.skill" = ["*.md", "references/*.md", "scripts/*.sh"]

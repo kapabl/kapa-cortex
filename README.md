@@ -1,10 +1,11 @@
-# kapa-stacker
+# kapa-cortex
 
-Split feature branches into reviewable, dependency-ordered stacked PRs.
+Local code intelligence engine — stacked PRs, repo analysis, dependency graphs.
 
-Analyzes code dependencies across 15+ languages, groups files into small PRs
-(~3 files, ~200 lines), generates git commands to create the branches, and
-uses a local LLM (ollama) for smarter grouping and PR descriptions.
+Analyzes code dependencies across 15+ languages using tree-sitter, ast-grep,
+ctags, lizard, difftastic, and co-change history. Splits feature branches into
+small PRs (~3 files, ~200 lines), generates git commands, and uses a local LLM
+(ollama) for smarter grouping. Runs as a CLI, daemon, or Claude Code skill.
 
 ## Install
 
@@ -12,36 +13,40 @@ uses a local LLM (ollama) for smarter grouping and PR descriptions.
 pip install -e .
 
 # Now use it anywhere:
-kapa-stacker --help
+kapa-cortex --help
 ```
 
 Or without installing:
 
 ```bash
 pip install networkx
-python kapa-stacker.py --help
+python kapa-cortex.py --help
 ```
 
 ## Quick Start
 
 ```bash
-# On your feature branch, analyze and see proposed stacked PRs
-kapa-stacker
+kapa-cortex index                       # pre-compute caches
+kapa-cortex analyze                     # see proposed stacked PRs
+kapa-cortex analyze --json              # JSON output
+kapa-cortex plan                        # generate git commands
+kapa-cortex run --dry-run               # preview execution
+kapa-cortex run                         # execute the plan
+kapa-cortex status                      # check progress
+kapa-cortex analyze --base develop      # custom base branch
+```
 
-# Generate an execution plan with all git commands
-kapa-stacker --generate-plan
+## Daemon Mode
 
-# Check plan progress
-kapa-stacker --check-plan
+Start once, query many times — keeps LSP servers warm and index in memory:
 
-# Execute the plan (interactive, with retry/skip)
-kapa-stacker --run-plan
-
-# Dry run first (preview without executing)
-kapa-stacker --run-plan --dry-run
-
-# If your base branch isn't main
-kapa-stacker --base develop
+```bash
+kapa-cortex daemon start                # boots pyright, clangd, gopls, jdtls, rust-analyzer
+kapa-cortex daemon status               # check health
+kapa-cortex daemon query analyze        # fast query
+kapa-cortex daemon query impact src/auth.py
+kapa-cortex daemon query hotspots
+kapa-cortex daemon stop
 ```
 
 ## Extract Specific Changes
@@ -49,21 +54,31 @@ kapa-stacker --base develop
 Pull a subset of files into a separate PR branch using natural language:
 
 ```bash
-kapa-stacker --extract "gradle init-script files"
-kapa-stacker --extract "src/core/ changes"
-kapa-stacker --extract "all CMakeLists.txt changes"
-kapa-stacker --extract "python test files"
-kapa-stacker --extract "the authentication refactor"
+kapa-cortex extract "gradle init-script files"
+kapa-cortex extract "src/core/ changes"
+kapa-cortex extract "all CMakeLists.txt changes"
+kapa-cortex extract "python test files"
+kapa-cortex extract "the authentication refactor"
 ```
+
+## Claude Code Skill
+
+Install as a Claude Code skill for token-efficient analysis:
+
+```bash
+kapa-cortex install-skill
+```
+
+Claude Code will auto-trigger on phrases like "split this branch into PRs",
+"analyze my changes", or "what depends on this file".
 
 ## Output Formats
 
 ```bash
-kapa-stacker --json
-kapa-stacker --visualize
-kapa-stacker --dot-file graph.dot
-kapa-stacker --print-commands
-kapa-stacker --shell-script > create-stack.sh
+kapa-cortex analyze --json              # JSON
+kapa-cortex analyze --dot               # DOT graph
+kapa-cortex plan --commands             # git commands only
+kapa-cortex plan --shell-script > stack.sh  # bash script
 ```
 
 ## AI Mode
@@ -72,78 +87,60 @@ AI is **on by default** using ollama. If ollama isn't running, it silently
 falls back to rule-based analysis. No API keys needed.
 
 ```bash
-# First time setup (installs ollama, pulls model, smoke tests it)
-kapa-stacker --setup
-
-# Use smallest model (~1.6 GB)
-kapa-stacker --setup-minimal
-
-# Check what's available
-kapa-stacker --ai-check
-
-# Disable AI
-kapa-stacker --no-ai
+kapa-cortex setup                # install all deps
+kapa-cortex setup --minimal      # smallest model (~1.6 GB)
+kapa-cortex ai-check             # check backends
+kapa-cortex analyze --no-ai      # disable AI for a single run
 ```
+
+## Risk & Complexity Labels
+
+The analysis shows human-readable warnings. Raw scores stay in `--json` output.
+
+### Risk (per PR, 0.0 – 1.0)
+
+Based on: structural code lines (30%), cyclomatic complexity (30%),
+cross-PR dependencies (20%), language diversity (20%).
+
+| Score | Label | What it means |
+|-------|-------|---------------|
+| 0.0 – 0.2 | Low | Small, simple, safe to merge |
+| 0.2 – 0.5 | Moderate | Normal review needed |
+| 0.5 – 0.7 | **High** | Careful review — shows warning with reasons |
+| 0.7 – 1.0 | **Critical** | Split further or get senior review |
+
+### Complexity (per PR, cyclomatic total)
+
+| Score | Label | What it means |
+|-------|-------|---------------|
+| 0 – 5 | Simple | Straightforward code |
+| 5 – 15 | Moderate | Some branching logic |
+| 15 – 30 | **Complex** | Shows warning — consider careful review |
+| 30+ | **Very complex** | Shows warning — consider refactoring |
+
+Warnings only appear for High/Critical risk and Complex/Very complex PRs.
+Low and Moderate PRs show no warnings — clean output.
 
 ## Supported Languages
 
 Python, C, C++, Java, Kotlin, Go, Rust, JavaScript, TypeScript,
 Gradle (Groovy + KTS), CMake, Buck2, BXL, Starlark/Bazel, Groovy.
 
-## Architecture (DDD + Layers)
+Analysis chain: LSP (daemon) → tree-sitter → ast-grep → regex.
+
+## Architecture (DDD + 4 Layers)
 
 ```
 src/
-  domain/                          # Pure logic, zero external deps
-    changed_file.py                  Entity
-    proposed_pr.py                   Entity
-    execution_plan.py                Entity (PlanStep, PRPlan)
-    import_ref.py                    Value object
-    symbol_def.py                    Value object
-    file_complexity.py               Value object
-    risk_score.py                    Value object
-    merge_strategy.py                Enum
-    step_status.py                   Enum
-    extraction_rule.py               Value object
-    test_pair.py                     Value object
-    dependency_resolver.py           Service
-    file_grouper.py                  Service
-    test_pair_finder.py              Service
-    risk_scorer.py                   Service
-    merge_strategy_assigner.py       Service
-    merge_order_resolver.py          Service
-    file_matcher.py                  Service
-    prompt_parser.py                 Service
-    pr_namer.py                      Service
-    ports/                           Interfaces
-      git_reader.py, import_parser.py, symbol_extractor.py,
-      complexity_analyzer.py, llm_service.py, plan_persistence.py,
-      command_runner.py
-
-  application/                     # Use cases
-    analyze_branch.py                Full analysis pipeline
-    extract_files.py                 Prompt-driven extraction
-    generate_plan.py                 Git execution plan
-    execute_plan.py                  Run plan steps
-
-  infrastructure/                  # All I/O
-    git/                             GitClient, ShellCommandRunner
-    parsers/                         Language detection, regex/AST parsers
-    complexity/                      lizard, scc analyzers
-    llm/                             Ollama, llama-cpp backends, setup
-    persistence/                     JSON plan store
-
-  presentation/                    # CLI + output
-    cli.py                           Entry point
-    reporters/                       text, JSON, DOT, mermaid, plan
+  domain/          # Pure logic, zero external deps
+  application/     # Use cases, orchestration
+  infrastructure/  # Git, parsers, LSP, LLM, caches
+  interface/       # CLI, daemon, reporters, skill
 ```
 
 ## Running Tests
 
 ```bash
-# Domain tests (fast, pure logic, zero mocks)
-python -m unittest discover -s tests/domain -v
-
-# All tests
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -v    # all tests
+python -m unittest discover -s tests/domain -v  # domain only (fast)
 ```

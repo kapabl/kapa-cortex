@@ -1,3 +1,3 @@
 """Allow running as: python -m src"""
-from src.presentation.cli import main
+from src.interface.cli.cli import main
 main()

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from src.infrastructure.parsers.import_dispatcher import dispatch_parse_imports
 
-CACHE_FILE = ".stacker-cache/imports.json"
+CACHE_FILE = ".cortex-cache/imports.json"
 
 
 def build_import_index(
@@ -26,12 +27,17 @@ def build_import_index(
     hashes = _compute_hashes(file_paths)
     result: dict[str, list[dict]] = {}
 
-    for path in file_paths:
+    total_files = len(file_paths)
+    parsed_count = 0
+    cached_count = 0
+
+    for index, path in enumerate(file_paths, 1):
         file_hash = hashes.get(path, "")
         cached = existing.get(path)
 
         if cached and cached.get("hash") == file_hash:
             result[path] = cached["imports"]
+            cached_count += 1
             continue
 
         source = _read_file(path)
@@ -43,9 +49,21 @@ def build_import_index(
             {"raw": imp.raw, "module": imp.module, "kind": imp.kind}
             for imp in imports
         ]
+        parsed_count += 1
+
+        if index % 200 == 0 or index == total_files:
+            _report_progress(index, total_files, cached_count, parsed_count)
 
     _save_cache(cache_path, result, hashes)
     return result
+
+
+def _report_progress(index, total, cached, parsed):
+    try:
+        from src.infrastructure.indexer.index_all import set_progress
+        set_progress(f"{index}/{total}  ({cached} cached, {parsed} parsed)")
+    except ImportError:
+        pass
 
 
 def load_import_cache(root: str = ".") -> dict[str, list[dict]] | None:
