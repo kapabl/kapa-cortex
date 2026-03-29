@@ -290,10 +290,18 @@ def _cmd_daemon(args):
     elif args.daemon_action == "status":
         _print_daemon_status()
     elif args.daemon_action == "query":
-        if not args.query_action:
-            print(f"  {RED}Missing query action. Example: kapa-cortex daemon query analyze{RESET}")
+        if not args.query_args:
+            print(f"  {RED}Missing query. Examples:{RESET}")
+            print(f"    {CYAN}kapa-cortex daemon query analyze{RESET}")
+            print(f"    {CYAN}kapa-cortex daemon query hotspots{RESET}")
+            print(f"    {CYAN}kapa-cortex daemon query impact src/foo.py{RESET}")
+            print(f"    {CYAN}kapa-cortex daemon query deps src/foo.py{RESET}")
             sys.exit(1)
-        _run_daemon_query(args.query_action)
+        action = args.query_args[0]
+        params = {}
+        if len(args.query_args) > 1:
+            params["target"] = args.query_args[1]
+        _run_daemon_query(action, params)
 
 
 def _cmd_install_skill(args):
@@ -385,7 +393,7 @@ def _parse_args():
     # ── daemon ──
     daemon_parser = subparsers.add_parser("daemon", help="Manage daemon (start/stop/status/query)")
     daemon_parser.add_argument("daemon_action", choices=["start", "stop", "status", "query"])
-    daemon_parser.add_argument("query_action", nargs="?", default=None, help="Query action (for daemon query)")
+    daemon_parser.add_argument("query_args", nargs="*", default=[], help="Query action and arguments (e.g., impact src/foo.py)")
     daemon_parser.set_defaults(func=_cmd_daemon)
 
     # ── install-skill ──
@@ -577,7 +585,7 @@ def _print_daemon_status():
         print(f"  {RED}Error: {response.error}{RESET}")
 
 
-def _run_daemon_query(action):
+def _run_daemon_query(action, params=None):
     import json as json_mod
     from src.interface.daemon.client import is_daemon_running, send_query
 
@@ -586,7 +594,7 @@ def _run_daemon_query(action):
         print(f"  Start with: {CYAN}kapa-cortex daemon start{RESET}")
         sys.exit(1)
 
-    response = send_query(action)
+    response = send_query(action, params)
     if response.status == "ok":
         print(json_mod.dumps(response.data, indent=2))
     else:
