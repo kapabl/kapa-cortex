@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "kapa-stacker"
+version = "0.1.0"
+description = "Split feature branches into reviewable, dependency-ordered stacked PRs"
+requires-python = ">=3.10"
+dependencies = [
+    "networkx>=3.0",
+]
+
+[project.optional-dependencies]
+ai = ["llama-cpp-python>=0.2.0"]
+full = [
+    "tree-sitter-languages>=1.10.0",
+    "lizard>=1.17.0",
+    "llama-cpp-python>=0.2.0",
+]
+
+[project.scripts]
+kapa-stacker = "src.presentation.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
