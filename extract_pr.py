@@ -339,12 +339,27 @@ def create_extraction_plan(
     base_branch: str,
     branch_name: str | None = None,
     include_deps: bool = True,
+    use_llm: bool = False,
 ) -> ExtractionPlan:
     """
     Create a plan to extract files matching the prompt into a new PR branch.
+
+    When use_llm=True and a local LLM is available, uses semantic understanding
+    to match files. Falls back to rule-based matching otherwise.
     """
-    rules = parse_extraction_prompt(prompt)
-    matched = match_files(all_files, rules)
+    matched = []
+    rules = []
+    llm_reasoning = ""
+
+    # Try LLM-powered extraction first
+    if use_llm:
+        matched, llm_reasoning = _extract_with_llm(prompt, all_files)
+
+    # Fall back to rule-based
+    if not matched:
+        rules = parse_extraction_prompt(prompt)
+        matched = match_files(all_files, rules)
+
     resolved = resolve_extraction_deps(matched, all_files, G, include_deps)
 
     matched_paths = {f.path for f in matched}
@@ -364,7 +379,7 @@ def create_extraction_plan(
         prompt=prompt,
     )
 
-    return ExtractionPlan(
+    plan = ExtractionPlan(
         prompt=prompt,
         rules=rules,
         matched_files=matched,
@@ -375,6 +390,64 @@ def create_extraction_plan(
         source_branch=source_branch,
         commands=commands,
     )
+    plan.llm_reasoning = llm_reasoning
+    return plan
+
+
+def _extract_with_llm(
+    prompt: str,
+    all_files: list,
+) -> tuple[list, str]:
+    """
+    Use local LLM to semantically match files to an extraction prompt.
+    Returns (matched_files, reasoning_text).
+    """
+    from llm_backend import get_llm, build_extraction_prompt, parse_json_response
+
+    llm = get_llm(verbose=False)
+    if not llm.available:
+        return [], ""
+
+    # Build file summaries for the prompt
+    file_summaries = []
+    for f in all_files:
+        # Extract first meaningful added line as summary
+        summary = ""
+        for line in f.diff_text.splitlines():
+            if line.startswith("+") and not line.startswith("+++") and len(line) > 5:
+                summary = line[1:].strip()[:80]
+                break
+        file_summaries.append({
+            "path": f.path,
+            "status": f.status,
+            "added": f.added,
+            "removed": f.removed,
+            "summary": summary,
+        })
+
+    llm_prompt = build_extraction_prompt(prompt, file_summaries)
+    response = llm.query(llm_prompt, json_mode=True)
+
+    if not response.ok:
+        return [], ""
+
+    data = parse_json_response(response)
+    if not data or not isinstance(data, dict):
+        return [], ""
+
+    matched_paths = set(data.get("matched", []))
+    reasoning = data.get("reasoning", "")
+    if isinstance(reasoning, dict):
+        reasoning = "\n".join(f"  {k}: {v}" for k, v in reasoning.items())
+    elif isinstance(reasoning, list):
+        reasoning = "\n".join(f"  - {r}" for r in reasoning)
+
+    title = data.get("suggested_title", "")
+    if title:
+        reasoning = f"Suggested title: {title}\n{reasoning}"
+
+    matched = [f for f in all_files if f.path in matched_paths]
+    return matched, reasoning
 
 
 def _generate_extraction_commands(

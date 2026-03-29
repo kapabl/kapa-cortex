@@ -66,6 +66,14 @@ from extract_pr import (
     create_extraction_plan,
     print_extraction_plan,
 )
+from llm_backend import (
+    get_llm,
+    check_backends,
+    build_grouping_prompt,
+    build_pr_description_prompt,
+    parse_json_response,
+    LLMBackend,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +597,128 @@ def partition_into_prs(
 
 
 # ---------------------------------------------------------------------------
+# LLM-powered grouping (optional, enhances partition_into_prs)
+# ---------------------------------------------------------------------------
+
+def partition_with_llm(
+    files: list[ChangedFile],
+    G: nx.DiGraph,
+    max_files: int = 3,
+    max_code_lines: int = 200,
+) -> list[ProposedPR] | None:
+    """
+    Use a local LLM to semantically group files into PRs.
+    Returns None if LLM is unavailable (caller should use rule-based).
+    """
+    llm = get_llm(verbose=False)
+    if not llm.available:
+        return None
+
+    # Build file summaries
+    file_summaries = []
+    for f in files:
+        file_summaries.append({
+            "path": f.path,
+            "status": f.status,
+            "added": f.added,
+            "removed": f.removed,
+            "module": f.module_key,
+            "is_docs": f.is_text_or_docs,
+        })
+
+    # Build dependency edges
+    dep_edges = [(u, v) for u, v in G.edges()]
+
+    prompt = build_grouping_prompt(file_summaries, dep_edges, max_files, max_code_lines)
+    response = llm.query(prompt, json_mode=True, max_tokens=4096)
+
+    if not response.ok:
+        return None
+
+    data = parse_json_response(response)
+    if not data or not isinstance(data, dict) or "prs" not in data:
+        return None
+
+    # Convert LLM output to ProposedPR objects
+    file_map = {f.path: f for f in files}
+    prs: list[ProposedPR] = []
+
+    for i, pr_data in enumerate(data["prs"], 1):
+        pr_files = []
+        for path in pr_data.get("files", []):
+            if path in file_map:
+                pr_files.append(file_map[path])
+
+        if not pr_files:
+            continue
+
+        prs.append(ProposedPR(
+            index=i,
+            title=pr_data.get("title", f"PR #{i}"),
+            files=pr_files,
+            depends_on=pr_data.get("depends_on", []),
+            merge_strategy=pr_data.get("merge_strategy", "squash"),
+        ))
+
+    # Catch any unassigned files
+    assigned = {f.path for pr in prs for f in pr.files}
+    unassigned = [f for f in files if f.path not in assigned]
+    if unassigned:
+        prs.append(ProposedPR(
+            index=len(prs) + 1,
+            title=f"PR #{len(prs) + 1}: remaining changes",
+            files=unassigned,
+        ))
+
+    return prs if prs else None
+
+
+def generate_pr_descriptions_llm(
+    prs: list[ProposedPR],
+    source_branch: str,
+) -> dict[int, str]:
+    """
+    Use a local LLM to generate PR descriptions.
+    Returns {pr_index: description_markdown}.
+    """
+    llm = get_llm(verbose=False)
+    if not llm.available:
+        return {}
+
+    descriptions: dict[int, str] = {}
+    for pr in prs:
+        file_dicts = [
+            {"path": f.path, "status": f.status, "added": f.added, "removed": f.removed}
+            for f in pr.files
+        ]
+
+        # Build diff summary from first few files
+        diff_summary = ""
+        for f in pr.files[:3]:
+            added_lines = [
+                line[1:] for line in f.diff_text.splitlines()
+                if line.startswith("+") and not line.startswith("+++")
+            ][:10]
+            if added_lines:
+                diff_summary += f"\n--- {f.path} ---\n" + "\n".join(added_lines)
+
+        deps = [f"PR #{d}" for d in pr.depends_on]
+
+        prompt = build_pr_description_prompt(
+            title=pr.title,
+            files=file_dicts,
+            diff_summary=diff_summary,
+            depends_on=deps,
+            merge_strategy=pr.merge_strategy,
+        )
+        response = llm.query(prompt, max_tokens=1024)
+        if response.ok:
+            descriptions[pr.index] = response.text
+
+    return descriptions
+
+
+# ---------------------------------------------------------------------------
 # PR dependency edges & merge strategies
 # ---------------------------------------------------------------------------
 
@@ -855,11 +985,33 @@ def _run_analysis(args) -> tuple[str, str, list[ChangedFile], nx.DiGraph, list, 
     print(f"  Analyzing co-change history...", file=sys.stderr)
     affinity = add_cochange_affinity(G, files)
 
-    print(f"  Partitioning into PRs...", file=sys.stderr)
-    prs = partition_into_prs(G, files, affinity, args.max_files, args.max_lines)
+    # Try LLM-powered grouping if --ai is set
+    prs = None
+    use_ai = getattr(args, "ai", False)
+    if use_ai:
+        print(f"  Using LLM for semantic grouping...", file=sys.stderr)
+        prs = partition_with_llm(G=G, files=files, max_files=args.max_files, max_code_lines=args.max_lines)
+        if prs:
+            print(f"  LLM grouped {len(files)} files into {len(prs)} PRs", file=sys.stderr)
+
+    # Fall back to rule-based partitioning
+    if not prs:
+        if use_ai:
+            print(f"  LLM unavailable, using rule-based partitioning...", file=sys.stderr)
+        else:
+            print(f"  Partitioning into PRs...", file=sys.stderr)
+        prs = partition_into_prs(G, files, affinity, args.max_files, args.max_lines)
+
     compute_pr_dependencies(prs, G)
     compute_risk_scores(prs)
     assign_merge_strategies(prs)
+
+    # Generate LLM descriptions if --ai
+    if use_ai:
+        descriptions = generate_pr_descriptions_llm(prs, branch)
+        for pr in prs:
+            if pr.index in descriptions:
+                pr.description = descriptions[pr.index]
 
     return branch, base_ref, files, G, prs, affinity
 
@@ -908,7 +1060,53 @@ def main() -> None:
     parser.add_argument("--no-deps", action="store_true",
                         help="Don't pull in dependency files during extraction")
 
+    # AI / LLM options
+    parser.add_argument("--ai", action="store_true",
+                        help="Use local LLM (ollama/llama-cpp) for smarter analysis")
+    parser.add_argument("--ai-backend", type=str, default=None,
+                        choices=["ollama", "llama-cpp", "none"],
+                        help="Force a specific LLM backend")
+    parser.add_argument("--ai-model", type=str, default=None,
+                        help="Force a specific model (e.g., qwen2.5-coder:7b)")
+    parser.add_argument("--ai-pull", action="store_true",
+                        help="Auto-pull model via ollama if not available")
+    parser.add_argument("--ai-check", action="store_true",
+                        help="Check available LLM backends and models")
+
     args = parser.parse_args()
+
+    # ── AI check (no analysis needed) ──
+    if args.ai_check:
+        results = check_backends()
+        print(f"\n{BOLD}  LLM Backend Status{RESET}")
+        print(f"  {'─' * 50}")
+        for name, info in results.items():
+            avail = f"{GREEN}available{RESET}" if info.get("available") else f"{RED}unavailable{RESET}"
+            print(f"  {name:12s}: {avail}")
+            for k, v in info.items():
+                if k == "available":
+                    continue
+                if k == "models" and isinstance(v, list):
+                    print(f"    {k}: {', '.join(v[:10])}" + (f" (+{len(v)-10} more)" if len(v) > 10 else ""))
+                else:
+                    print(f"    {k}: {v}")
+        print()
+        print(f"  {BOLD}Usage:{RESET}")
+        print(f"    {CYAN}python stacked_pr_analyzer.py --ai{RESET}                    # auto-detect")
+        print(f"    {CYAN}python stacked_pr_analyzer.py --ai --ai-model qwen2.5-coder:7b{RESET}")
+        print(f"    {CYAN}python stacked_pr_analyzer.py --ai --ai-pull{RESET}           # auto-pull model")
+        print()
+        print(f"  {BOLD}Install ollama:{RESET}")
+        print(f"    macOS:  {CYAN}brew install ollama && ollama serve{RESET}")
+        print(f"    Linux:  {CYAN}curl -fsSL https://ollama.com/install.sh | sh{RESET}")
+        print(f"    WSL2:   {CYAN}curl -fsSL https://ollama.com/install.sh | sh{RESET}")
+        print(f"    Then:   {CYAN}ollama pull qwen2.5-coder:7b{RESET}")
+        print()
+        return
+
+    # Initialize LLM if --ai flag is set
+    if args.ai:
+        get_llm(backend=args.ai_backend, model=args.ai_model, auto_pull=args.ai_pull)
 
     # ── Check plan (no analysis needed) ──
     if args.check_plan:
@@ -950,6 +1148,7 @@ def main() -> None:
             base_branch=args.base,
             branch_name=args.extract_branch,
             include_deps=not args.no_deps,
+            use_llm=getattr(args, "ai", False),
         )
         print_extraction_plan(plan)
 

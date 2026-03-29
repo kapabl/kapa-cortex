@@ -747,6 +747,126 @@ class TestExtractionMatching(unittest.TestCase):
         self.assertEqual(matched[0].path, "setup.py")
 
 
+# ---------------------------------------------------------------------------
+# LLM backend tests
+# ---------------------------------------------------------------------------
+
+from llm_backend import (
+    OllamaBackend,
+    LlamaCppBackend,
+    NullBackend,
+    LLMResponse,
+    get_llm,
+    check_backends,
+    build_extraction_prompt,
+    build_grouping_prompt,
+    build_pr_description_prompt,
+    parse_json_response,
+)
+
+
+class TestNullBackend(unittest.TestCase):
+    def test_not_available(self):
+        b = NullBackend()
+        self.assertFalse(b.available)
+
+    def test_query_returns_error(self):
+        b = NullBackend()
+        resp = b.query("test")
+        self.assertFalse(resp.ok)
+        self.assertEqual(resp.backend, "none")
+
+
+class TestLLMResponse(unittest.TestCase):
+    def test_ok(self):
+        r = LLMResponse(text="hello", model="test", backend="test")
+        self.assertTrue(r.ok)
+
+    def test_not_ok_empty(self):
+        r = LLMResponse(text="", model="test", backend="test")
+        self.assertFalse(r.ok)
+
+    def test_not_ok_error(self):
+        r = LLMResponse(text="data", model="test", backend="test", error="fail")
+        self.assertFalse(r.ok)
+
+
+class TestParseJsonResponse(unittest.TestCase):
+    def test_clean_json(self):
+        r = LLMResponse(text='{"matched": ["a.py"]}', model="t", backend="t")
+        data = parse_json_response(r)
+        self.assertEqual(data, {"matched": ["a.py"]})
+
+    def test_json_in_code_fence(self):
+        r = LLMResponse(text='```json\n{"foo": 1}\n```', model="t", backend="t")
+        data = parse_json_response(r)
+        self.assertEqual(data, {"foo": 1})
+
+    def test_json_with_preamble(self):
+        r = LLMResponse(text='Here is the result:\n{"bar": 2}', model="t", backend="t")
+        data = parse_json_response(r)
+        self.assertEqual(data, {"bar": 2})
+
+    def test_empty_response(self):
+        r = LLMResponse(text="", model="t", backend="t", error="fail")
+        self.assertIsNone(parse_json_response(r))
+
+
+class TestPromptBuilders(unittest.TestCase):
+    def test_extraction_prompt(self):
+        prompt = build_extraction_prompt(
+            "gradle files",
+            [{"path": "build.gradle", "status": "M", "added": 10, "removed": 5}],
+        )
+        self.assertIn("gradle files", prompt)
+        self.assertIn("build.gradle", prompt)
+        self.assertIn("JSON", prompt)
+
+    def test_grouping_prompt(self):
+        prompt = build_grouping_prompt(
+            [{"path": "a.py", "status": "M", "added": 50, "removed": 0}],
+            [("a.py", "b.py")],
+            max_files=3,
+            max_lines=200,
+        )
+        self.assertIn("a.py", prompt)
+        self.assertIn("depends on", prompt)
+        self.assertIn("JSON", prompt)
+
+    def test_pr_description_prompt(self):
+        prompt = build_pr_description_prompt(
+            title="Add auth module",
+            files=[{"path": "auth.py", "status": "A", "added": 100, "removed": 0}],
+            diff_summary="+class AuthManager:",
+            depends_on=["PR #1"],
+            merge_strategy="squash",
+        )
+        self.assertIn("auth.py", prompt)
+        self.assertIn("squash", prompt)
+
+
+class TestCheckBackends(unittest.TestCase):
+    def test_returns_dict(self):
+        results = check_backends()
+        self.assertIn("ollama", results)
+        self.assertIn("llama-cpp", results)
+
+
+class TestGetLlm(unittest.TestCase):
+    def test_none_backend(self):
+        # Reset cache
+        import llm_backend
+        llm_backend._cached_backend = None
+        llm = get_llm(backend="none", verbose=False)
+        self.assertFalse(llm.available)
+        self.assertEqual(llm.name, "none")
+        llm_backend._cached_backend = None  # clean up
+
+
+# ---------------------------------------------------------------------------
+# Extraction plan
+# ---------------------------------------------------------------------------
+
 class TestExtractionPlan(unittest.TestCase):
     def test_creates_plan(self):
         files = [
