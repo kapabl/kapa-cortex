@@ -170,6 +170,74 @@ src/
 - `--query "hotspots"` — highest complexity + most dependents
 - `--query "migration old_module new_module"` — trace impact
 
+## Phase 5: Cloud Index (S3-backed shared index)
+
+### Why
+On a 100K file monorepo, building the index takes minutes. Every developer
+rebuilds the same index for the same commit. Sharing it via S3 means build
+once, download everywhere — 2 seconds instead of 2 minutes.
+
+### How it works
+- Index is keyed by `{repo}:{commit_hash}` — same commit = same source = same index
+- CI builds index on every merge to main → pushes to S3
+- Developers pull instead of rebuilding
+- Daemon checks S3 before building locally
+
+### CLI commands
+```bash
+kapa-cortex index                    # build locally (same as today)
+kapa-cortex index --push             # upload index to S3
+kapa-cortex index --pull             # download from S3 if available
+kapa-cortex index --auto             # pull if available, build if not, push after
+```
+
+### Configuration
+```json
+// .cortex-config.json or env vars
+{
+  "cloud": {
+    "enabled": true,
+    "backend": "s3",
+    "bucket": "kapa-cortex-indexes",
+    "prefix": "monorepo-name/"
+  }
+}
+```
+
+### Index key format
+```
+s3://kapa-cortex-indexes/monorepo-name/{commit_hash}/index.msgpack
+```
+
+### New files
+- `src/domain/port/index_storage.py` — port for remote index storage
+- `src/infrastructure/cloud/s3_storage.py` — S3 implementation (boto3)
+- `src/infrastructure/cloud/local_storage.py` — local fallback (no cloud)
+
+### CI integration
+```yaml
+# GitHub Actions example
+- name: Build kapa-cortex index
+  run: |
+    pip install kapa-cortex
+    kapa-cortex index --push
+```
+
+Every PR check downloads the base branch index instead of rebuilding.
+Branch-specific analysis (diff) is fast — only changed files need parsing.
+
+### Security
+- Index contains file paths, symbol names, complexity scores — no source code
+- Keyed by commit hash — can't access other commits without the hash
+- S3 bucket policies control who can push/pull
+- Optional: encrypt at rest, sign index files
+
+### Effort: Medium
+- boto3 integration
+- Commit hash → S3 key mapping
+- CLI flags for push/pull/auto
+- Config file for cloud settings
+
 ## Critical Source Files
 - `src/domain/service/dependency_resolver.py` — where LSP edges feed in
 - `src/infrastructure/parsers/import_dispatcher.py` — parser chain (standalone)
@@ -187,6 +255,8 @@ src/
 6. **In-memory index** — full-repo, incremental
 7. **Claude Code skill** — SKILL.md, references, scripts
 8. **Full-repo queries** — impact, deps, hotspots, migration
+9. **Call graph** — tree-sitter call extraction, symbol-level impact
+10. **Cloud index** — S3-backed shared index, push/pull/auto
 
 ## Verification
 - `kapa-cortex --daemon` starts, `--status` shows LSPs running
