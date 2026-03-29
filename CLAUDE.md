@@ -9,12 +9,9 @@
 - **Infrastructure layer** — All external I/O: git, LLM backends, file system,
   parsers (tree-sitter, ast-grep, ctags, lizard), LSP clients, subprocess calls.
   Implements repository interfaces defined in domain.
-- **Interface layer** — Daemon server, query protocol, MCP wrapper.
-  The API surface between kapa-cortex and its clients.
-  Imports from application and domain. Never from infrastructure.
-- **Presentation layer** — CLI arg parsing, terminal output, reporters
-  (text, JSON, DOT, Mermaid). Thin client: talks to daemon via interface
-  layer, or calls application layer directly as fallback. No business logic.
+- **Interface layer** — All entry points: CLI, daemon server, reporters,
+  future MCP/web. Imports from application and domain. Never from infrastructure.
+  No business logic — only translates between protocols and use cases.
 
 ## Single Responsibility Principle
 
@@ -52,14 +49,12 @@ src/
   domain/            # Core models and business logic
   application/       # Use cases, orchestration
   infrastructure/    # Git, LLM, parsers, LSP, external tools
-  interface/         # Daemon server, query protocol, MCP wrapper
-  presentation/      # CLI, reporters, formatters
+  interface/         # CLI, daemon, reporters, MCP (all entry points)
 tests/
   domain/            # Mirrors src/domain/
   application/       # Mirrors src/application/
   infrastructure/    # Mirrors src/infrastructure/
   interface/         # Mirrors src/interface/
-  presentation/      # Mirrors src/presentation/
 ```
 
 - Tests mirror source structure exactly.
@@ -75,11 +70,10 @@ tests/
 
 ## Dependencies
 
-- Domain layer imports **nothing** from application, infrastructure, interface, or presentation.
+- Domain layer imports **nothing** from application, infrastructure, or interface.
 - Application layer imports from domain only.
 - Infrastructure layer imports from domain (to implement interfaces).
 - Interface layer imports from application and domain. Never from infrastructure.
-- Presentation layer imports from interface (daemon client), application, and domain.
 - Never import upward through layers.
 
 ## Code Navigation (mandatory for all agents and sub-agents)

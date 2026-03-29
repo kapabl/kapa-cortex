@@ -1,4 +1,4 @@
-"""Presentation: CLI entry point. No business logic here."""
+"""Interface: CLI entry point. No business logic here."""
 
 from __future__ import annotations
 
@@ -20,11 +20,11 @@ from src.application.extract_files import ExtractFilesUseCase
 from src.application.generate_plan import GeneratePlanUseCase
 from src.application.execute_plan import ExecutePlanUseCase
 
-from src.presentation.reporters.text_reporter import print_analysis
-from src.presentation.reporters.json_reporter import print_json
-from src.presentation.reporters.dot_reporter import generate_dot
-from src.presentation.reporters.plan_reporter import print_plan_status, print_commands, generate_shell_script
-from src.presentation.reporters.extraction_reporter import print_extraction
+from src.interface.reporters.text_reporter import print_analysis
+from src.interface.reporters.json_reporter import print_json
+from src.interface.reporters.dot_reporter import generate_dot
+from src.interface.reporters.plan_reporter import print_plan_status, print_commands, generate_shell_script
+from src.interface.reporters.extraction_reporter import print_extraction
 
 BOLD = "\033[0m\033[1m"
 CYAN = "\033[36m"
@@ -334,5 +334,5 @@ def _print_ai_status():
             else:
                 print(f"    {k}: {v}")
     print(f"\n  AI is ON by default. Use {CYAN}--no-ai{RESET} to disable.")
-    print(f"  Setup: {CYAN}python -m src.presentation.cli --setup{RESET}")
+    print(f"  Setup: {CYAN}kapa-cortex --setup{RESET}")
     print()

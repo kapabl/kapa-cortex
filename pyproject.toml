@@ -20,7 +20,7 @@ full = [
 ]
 
 [project.scripts]
-kapa-cortex = "src.presentation.cli:main"
+kapa-cortex = "src.interface.cli.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["src*"]

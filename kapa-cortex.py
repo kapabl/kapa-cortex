@@ -1,4 +1,4 @@
 #!/usr/bin/env python3
 """Entry point: kapa-cortex"""
-from src.presentation.cli import main
+from src.interface.cli.cli import main
 main()
