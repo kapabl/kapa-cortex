@@ -1072,8 +1072,21 @@ def main() -> None:
                         help="Auto-pull model via ollama if not available")
     parser.add_argument("--ai-check", action="store_true",
                         help="Check available LLM backends and models")
+    parser.add_argument("--setup", action="store_true",
+                        help="Setup ollama (install, start, pull model)")
+    parser.add_argument("--setup-minimal", action="store_true",
+                        help="Setup with smallest model (~1.6 GB)")
 
     args = parser.parse_args()
+
+    # ── Setup ollama ──
+    if args.setup or args.setup_minimal:
+        from setup_ollama import run_setup
+        success = run_setup(
+            model=args.ai_model,
+            minimal=args.setup_minimal,
+        )
+        sys.exit(0 if success else 1)
 
     # ── AI check (no analysis needed) ──
     if args.ai_check:
