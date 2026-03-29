@@ -134,12 +134,21 @@ def _get_index_store():
     return _index_store
 
 
-def build_handler_map() -> dict:
+def build_handler_map(server=None) -> dict:
     """Build action → handler mapping for the query router."""
-    return {
+    handlers = {
         "analyze": handle_analyze,
         "impact": handle_impact,
         "deps": handle_deps,
         "hotspots": handle_hotspots,
         "status": handle_status,
     }
+    if server:
+        handlers["shutdown"] = lambda params: _handle_shutdown(server)
+    return handlers
+
+
+def _handle_shutdown(server) -> dict:
+    """Shutdown the daemon gracefully."""
+    server.request_shutdown()
+    return {"message": "Shutting down"}

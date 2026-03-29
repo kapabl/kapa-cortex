@@ -32,6 +32,7 @@ class DaemonServer:
         self._on_stop = on_stop
         self._running = False
         self._server_socket: socket.socket | None = None
+        self._shutdown_requested = False
 
     def start(self) -> None:
         """Start listening. Blocks until stop() is called."""
@@ -56,6 +57,8 @@ class DaemonServer:
                 )
                 thread.start()
             except socket.timeout:
+                if self._shutdown_requested:
+                    break
                 continue
             except OSError:
                 break
@@ -64,6 +67,10 @@ class DaemonServer:
 
     def stop(self) -> None:
         self._running = False
+
+    def request_shutdown(self) -> None:
+        """Called by shutdown handler to stop the server after responding."""
+        self._shutdown_requested = True
 
     def _handle_connection(self, conn: socket.socket) -> None:
         try:

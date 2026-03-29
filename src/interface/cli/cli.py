@@ -560,8 +560,9 @@ def _start_daemon():
             print(f"  {CYAN}Index saved to {cache_path}{RESET}")
 
     print(f"  {BOLD}Starting kapa-cortex daemon...{RESET}")
-    router = QueryRouter(build_handler_map())
-    server = DaemonServer(router, on_start=on_start, on_stop=on_stop)
+    server = DaemonServer(QueryRouter({}), on_start=on_start, on_stop=on_stop)
+    router = QueryRouter(build_handler_map(server))
+    server._router = router
     print(f"  {GREEN}Listening on unix socket{RESET}")
     server.start()
 
