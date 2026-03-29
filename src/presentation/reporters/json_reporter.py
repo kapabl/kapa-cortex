@@ -1,0 +1,38 @@
+"""Presentation: JSON output reporter."""
+
+from __future__ import annotations
+
+import json
+
+
+def print_json(prs, branch, base, graph):
+    data = {
+        "branch": branch,
+        "base": base,
+        "total_prs": len(prs),
+        "file_dependency_edges": graph.number_of_edges(),
+        "prs": [_pr_to_dict(pr) for pr in prs],
+    }
+    print(json.dumps(data, indent=2))
+
+
+def _pr_to_dict(pr):
+    return {
+        "index": pr.index,
+        "title": pr.title,
+        "files": [
+            {
+                "path": f.path, "status": f.status,
+                "added": f.added, "removed": f.removed,
+                "is_docs": f.is_text_or_docs,
+                "complexity": f.cyclomatic_complexity,
+            }
+            for f in pr.files
+        ],
+        "code_lines": pr.total_code_lines,
+        "total_lines": pr.total_all_lines,
+        "complexity": pr.total_complexity,
+        "depends_on": pr.depends_on,
+        "merge_strategy": pr.merge_strategy,
+        "risk_score": pr.risk_score,
+    }
