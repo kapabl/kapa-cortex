@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
-from src.domain.changed_file import ChangedFile
-from src.domain.import_ref import ImportRef
-from src.domain.symbol_def import SymbolDef
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.value_object.import_ref import ImportRef
+from src.domain.value_object.symbol_def import SymbolDef
 
 
 def build_dependency_edges(

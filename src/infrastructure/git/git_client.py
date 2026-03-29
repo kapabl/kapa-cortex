@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import subprocess
 
-from src.domain.changed_file import ChangedFile
-from src.domain.ports.git_reader import GitReader
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.port.git_reader import GitReader
 
 
 class GitClient(GitReader):

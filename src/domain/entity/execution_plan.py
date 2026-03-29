@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.domain.step_status import StepStatus
+from src.domain.value_object.step_status import StepStatus
 
 
 @dataclass

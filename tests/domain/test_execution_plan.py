@@ -2,7 +2,7 @@
 
 import json
 import unittest
-from src.domain.execution_plan import ExecutionPlan, PRPlan, PlanStep
+from src.domain.entity.execution_plan import ExecutionPlan, PRPlan, PlanStep
 
 
 class TestExecutionPlan(unittest.TestCase):

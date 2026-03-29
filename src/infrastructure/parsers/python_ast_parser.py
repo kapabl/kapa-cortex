@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import re
 
-from src.domain.import_ref import ImportRef
+from src.domain.value_object.import_ref import ImportRef
 
 
 def parse_python_imports(source: str) -> list[ImportRef]:

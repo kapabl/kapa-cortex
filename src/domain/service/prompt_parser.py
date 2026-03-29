@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from src.domain.extraction_rule import ExtractionRule
+from src.domain.value_object.extraction_rule import ExtractionRule
 
 _KEYWORD_MAP: dict[str, list[ExtractionRule]] = {
     "gradle": [

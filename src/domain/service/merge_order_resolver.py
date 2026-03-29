@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.domain.proposed_pr import ProposedPR
+from src.domain.entity.proposed_pr import ProposedPR
 
 
 def compute_merge_order(prs: list[ProposedPR]) -> list[ProposedPR]:

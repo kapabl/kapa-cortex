@@ -1,4 +1,4 @@
-"""Domain service: partition files into PR-sized groups."""
+"""Factory: partition files into PR-sized groups."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-from src.domain.changed_file import ChangedFile
-from src.domain.proposed_pr import ProposedPR
-from src.domain.test_pair import TestPair
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.entity.proposed_pr import ProposedPR
+from src.domain.value_object.test_pair import TestPair
 
 
 def partition(

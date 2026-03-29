@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from src.domain.execution_plan import ExecutionPlan, PRPlan, PlanStep
-from src.domain.proposed_pr import ProposedPR
+from src.domain.entity.execution_plan import ExecutionPlan, PRPlan, PlanStep
+from src.domain.entity.proposed_pr import ProposedPR
 
 
 class GeneratePlanUseCase:

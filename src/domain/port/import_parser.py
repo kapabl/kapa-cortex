@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from src.domain.import_ref import ImportRef
+from src.domain.value_object.import_ref import ImportRef
 
 
 class ImportParser(ABC):

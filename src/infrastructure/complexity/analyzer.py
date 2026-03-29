@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.domain.file_complexity import FileComplexity
-from src.domain.ports.complexity_analyzer import ComplexityAnalyzer
+from src.domain.value_object.file_complexity import FileComplexity
+from src.domain.port.complexity_analyzer import ComplexityAnalyzer
 from src.infrastructure.complexity.lizard_analyzer import analyze_lizard
 from src.infrastructure.complexity.scc_analyzer import analyze_scc
 

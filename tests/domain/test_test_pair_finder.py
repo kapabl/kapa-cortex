@@ -1,8 +1,8 @@
 """Tests for test file pairing."""
 
 import unittest
-from src.domain.changed_file import ChangedFile
-from src.domain.test_pair_finder import find_test_pairs
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.service.test_pair_finder import find_test_pairs
 
 
 def _f(path):

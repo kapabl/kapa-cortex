@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.domain.ports.llm_service import LLMResponse, LLMService
+from src.domain.port.llm_service import LLMResponse, LLMService
 from src.infrastructure.llm.backends import (
     OllamaBackend as _Ollama,
     LlamaCppBackend as _LlamaCpp,

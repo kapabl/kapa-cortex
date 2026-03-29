@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from src.domain.file_complexity import FileComplexity, FunctionComplexity
+from src.domain.value_object.file_complexity import FileComplexity, FunctionComplexity
 
 
 def analyze_lizard(file_paths: list[str]) -> dict[str, FileComplexity]:

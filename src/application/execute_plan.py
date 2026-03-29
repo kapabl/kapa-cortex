@@ -5,16 +5,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.domain.execution_plan import ExecutionPlan
-from src.domain.step_status import StepStatus
-from src.domain.ports.command_runner import CommandRunner
-from src.domain.ports.plan_persistence import PlanPersistence
+from src.domain.entity.execution_plan import ExecutionPlan
+from src.domain.value_object.step_status import StepStatus
+from src.domain.port.command_runner import CommandRunner
+from src.domain.repository.plan_repository import PlanRepository
 
 
 class ExecutePlanUseCase:
     """Runs plan steps via the command runner."""
 
-    def __init__(self, runner: CommandRunner, store: PlanPersistence):
+    def __init__(self, runner: CommandRunner, store: PlanRepository):
         self._runner = runner
         self._store = store
 

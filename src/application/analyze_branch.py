@@ -6,20 +6,20 @@ import os
 
 import networkx as nx
 
-from src.domain.changed_file import ChangedFile
-from src.domain.proposed_pr import ProposedPR
-from src.domain.dependency_resolver import build_dependency_edges
-from src.domain.file_grouper import partition
-from src.domain.merge_order_resolver import compute_pr_dependencies
-from src.domain.risk_scorer import compute_risk
-from src.domain.merge_strategy_assigner import assign_strategies
-from src.domain.test_pair_finder import find_test_pairs
-from src.domain.pr_namer import generate_title
-from src.domain.ports.git_reader import GitReader
-from src.domain.ports.import_parser import ImportParser
-from src.domain.ports.symbol_extractor import SymbolExtractor
-from src.domain.ports.complexity_analyzer import ComplexityAnalyzer
-from src.domain.ports.llm_service import LLMService
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.entity.proposed_pr import ProposedPR
+from src.domain.service.dependency_resolver import build_dependency_edges
+from src.domain.factory.pr_set_factory import partition
+from src.domain.service.merge_order_resolver import compute_pr_dependencies
+from src.domain.policy.risk_policy import compute_risk
+from src.domain.policy.merge_strategy_policy import assign_strategies
+from src.domain.service.test_pair_finder import find_test_pairs
+from src.domain.service.pr_namer import generate_title
+from src.domain.port.git_reader import GitReader
+from src.domain.port.import_parser import ImportParser
+from src.domain.port.symbol_extractor import SymbolExtractor
+from src.domain.port.complexity_analyzer import ComplexityAnalyzer
+from src.domain.port.llm_service import LLMService
 
 
 class AnalyzeBranchUseCase:

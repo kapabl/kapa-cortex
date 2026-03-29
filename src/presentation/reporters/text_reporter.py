@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.domain.proposed_pr import ProposedPR
-from src.domain.merge_order_resolver import compute_merge_order, compute_waves
+from src.domain.entity.proposed_pr import ProposedPR
+from src.domain.service.merge_order_resolver import compute_merge_order, compute_waves
 
 RESET = "\033[0m"
 BOLD = "\033[1m"

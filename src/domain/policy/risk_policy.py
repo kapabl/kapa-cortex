@@ -1,8 +1,8 @@
-"""Domain service: compute risk scores for proposed PRs."""
+"""Policy: compute risk scores for proposed PRs."""
 
 from __future__ import annotations
 
-from src.domain.proposed_pr import ProposedPR
+from src.domain.entity.proposed_pr import ProposedPR
 
 
 def compute_risk(pr: ProposedPR) -> float:

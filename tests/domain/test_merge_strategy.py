@@ -1,9 +1,9 @@
 """Tests for merge strategy assignment."""
 
 import unittest
-from src.domain.changed_file import ChangedFile
-from src.domain.proposed_pr import ProposedPR
-from src.domain.merge_strategy_assigner import assign_strategies
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.entity.proposed_pr import ProposedPR
+from src.domain.policy.merge_strategy_policy import assign_strategies
 
 
 def _f(path, added=10, removed=5):

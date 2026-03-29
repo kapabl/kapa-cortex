@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from src.domain.file_complexity import FileComplexity
+from src.domain.value_object.file_complexity import FileComplexity
 
 
 def analyze_scc(file_paths: list[str]) -> dict[str, FileComplexity]:

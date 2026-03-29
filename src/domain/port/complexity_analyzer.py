@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from src.domain.file_complexity import FileComplexity
+from src.domain.value_object.file_complexity import FileComplexity
 
 
 class ComplexityAnalyzer(ABC):

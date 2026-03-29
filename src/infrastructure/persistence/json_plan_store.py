@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.domain.execution_plan import ExecutionPlan
-from src.domain.ports.plan_persistence import PlanPersistence
+from src.domain.entity.execution_plan import ExecutionPlan
+from src.domain.repository.plan_repository import PlanRepository
 
 DEFAULT_PLAN_FILE = ".stacked-pr-plan.json"
 
 
-class JsonPlanStore(PlanPersistence):
+class JsonPlanStore(PlanRepository):
     """Saves/loads execution plans as JSON files."""
 
     def __init__(self, path: str = DEFAULT_PLAN_FILE):

@@ -6,8 +6,8 @@ import fnmatch
 import re
 from pathlib import Path
 
-from src.domain.changed_file import ChangedFile
-from src.domain.extraction_rule import ExtractionRule
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.value_object.extraction_rule import ExtractionRule
 
 
 def match_files(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from src.domain.ports.command_runner import CommandRunner
+from src.domain.port.command_runner import CommandRunner
 
 
 class ShellCommandRunner(CommandRunner):

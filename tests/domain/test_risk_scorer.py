@@ -1,9 +1,9 @@
 """Tests for risk scoring."""
 
 import unittest
-from src.domain.changed_file import ChangedFile
-from src.domain.proposed_pr import ProposedPR
-from src.domain.risk_scorer import compute_risk
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.entity.proposed_pr import ProposedPR
+from src.domain.policy.risk_policy import compute_risk
 
 
 def _f(path, added=10, removed=5):

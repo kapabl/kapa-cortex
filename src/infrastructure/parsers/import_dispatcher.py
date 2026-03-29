@@ -5,7 +5,7 @@ Chain: tree-sitter -> ast-grep -> Python AST / regex fallback.
 
 from __future__ import annotations
 
-from src.domain.import_ref import ImportRef
+from src.domain.value_object.import_ref import ImportRef
 from src.infrastructure.parsers.language_detector import detect_language
 from src.infrastructure.parsers.python_ast_parser import parse_python_imports
 from src.infrastructure.parsers import regex_parsers as rp

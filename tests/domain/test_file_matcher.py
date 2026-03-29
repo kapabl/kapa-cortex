@@ -1,9 +1,9 @@
 """Tests for file matching."""
 
 import unittest
-from src.domain.changed_file import ChangedFile
-from src.domain.extraction_rule import ExtractionRule
-from src.domain.file_matcher import match_files
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.value_object.extraction_rule import ExtractionRule
+from src.domain.service.file_matcher import match_files
 
 
 def _f(path, diff=""):

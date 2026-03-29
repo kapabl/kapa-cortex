@@ -1,7 +1,7 @@
 """Tests for ChangedFile entity."""
 
 import unittest
-from src.domain.changed_file import ChangedFile
+from src.domain.entity.changed_file import ChangedFile
 
 
 class TestChangedFile(unittest.TestCase):

@@ -1,17 +1,17 @@
-"""Domain service: assign merge strategies to PRs."""
+"""Policy: assign merge strategies to PRs."""
 
 from __future__ import annotations
 
-from src.domain.merge_strategy import MergeStrategy
-from src.domain.proposed_pr import ProposedPR
+from src.domain.value_object.merge_strategy import MergeStrategy
+from src.domain.entity.proposed_pr import ProposedPR
 
 
 def assign_strategies(prs: list[ProposedPR]) -> None:
     """
     Assign merge strategy per PR:
-      - merge  : has dependents, or high risk (preserve bisect context)
-      - rebase : docs/config only, no dependents (linear history)
-      - squash : default (clean single commit)
+      - merge  : has dependents, or high risk
+      - rebase : docs/config only, no dependents
+      - squash : default
     """
     depended_on = _find_depended_on(prs)
 

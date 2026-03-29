@@ -7,11 +7,11 @@ from dataclasses import dataclass, field
 
 import networkx as nx
 
-from src.domain.changed_file import ChangedFile
-from src.domain.extraction_rule import ExtractionRule
-from src.domain.file_matcher import match_files
-from src.domain.prompt_parser import parse_prompt
-from src.domain.ports.llm_service import LLMService
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.value_object.extraction_rule import ExtractionRule
+from src.domain.service.file_matcher import match_files
+from src.domain.service.prompt_parser import parse_prompt
+from src.domain.port.llm_service import LLMService
 
 
 @dataclass

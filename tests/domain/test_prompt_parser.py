@@ -1,7 +1,7 @@
 """Tests for prompt parsing."""
 
 import unittest
-from src.domain.prompt_parser import parse_prompt
+from src.domain.service.prompt_parser import parse_prompt
 
 
 class TestPromptParser(unittest.TestCase):

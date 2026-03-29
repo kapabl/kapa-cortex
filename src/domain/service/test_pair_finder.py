@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 
-from src.domain.changed_file import ChangedFile
-from src.domain.test_pair import TestPair
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.value_object.test_pair import TestPair
 
 _PATTERNS = [
     (re.compile(r"^(.*/)?test_(.+)\.py$"), r"\1\2.py"),

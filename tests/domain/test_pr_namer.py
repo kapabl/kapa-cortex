@@ -1,8 +1,8 @@
 """Tests for PR title generation from code changes."""
 
 import unittest
-from src.domain.changed_file import ChangedFile
-from src.domain.pr_namer import generate_title
+from src.domain.entity.changed_file import ChangedFile
+from src.domain.service.pr_namer import generate_title
 
 
 def _f(path, status="M", diff=""):

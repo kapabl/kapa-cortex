@@ -180,7 +180,7 @@ def _run_extraction(args, git, llm):
 
     # Quick enrichment for extraction
     import networkx as nx
-    from src.domain.dependency_resolver import build_dependency_edges
+    from src.domain.service.dependency_resolver import build_dependency_edges
     imports_by_file = {}
     for f in files:
         source = git.file_source(f.path)

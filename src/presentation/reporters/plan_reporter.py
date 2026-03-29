@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.domain.execution_plan import ExecutionPlan
-from src.domain.step_status import StepStatus
+from src.domain.entity.execution_plan import ExecutionPlan
+from src.domain.value_object.step_status import StepStatus
 
 RESET = "\033[0m"
 BOLD = "\033[1m"

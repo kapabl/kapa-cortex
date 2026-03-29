@@ -7,10 +7,10 @@ and strategy selection (tree-sitter -> ast-grep -> ast -> regex).
 
 from __future__ import annotations
 
-from src.domain.import_ref import ImportRef
-from src.domain.symbol_def import SymbolDef
-from src.domain.ports.import_parser import ImportParser
-from src.domain.ports.symbol_extractor import SymbolExtractor
+from src.domain.value_object.import_ref import ImportRef
+from src.domain.value_object.symbol_def import SymbolDef
+from src.domain.port.import_parser import ImportParser
+from src.domain.port.symbol_extractor import SymbolExtractor
 from src.infrastructure.parsers.import_dispatcher import dispatch_parse_imports
 
 

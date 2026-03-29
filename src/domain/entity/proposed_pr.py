@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.domain.changed_file import ChangedFile
+from src.domain.entity.changed_file import ChangedFile
 
 
 @dataclass
