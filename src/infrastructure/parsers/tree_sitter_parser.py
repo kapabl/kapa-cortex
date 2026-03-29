@@ -115,9 +115,12 @@ _SYMBOL_QUERIES: dict[str, str] = {
 def _run_query(source: str, lang: str, query_text: str) -> list[str]:
     """Run a tree-sitter query and return matched text nodes."""
     try:
+        import warnings
         import tree_sitter_languages
-        parser = tree_sitter_languages.get_parser(lang)
-        ts_lang = tree_sitter_languages.get_language(lang)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            parser = tree_sitter_languages.get_parser(lang)
+            ts_lang = tree_sitter_languages.get_language(lang)
     except (ImportError, Exception):
         return []
 

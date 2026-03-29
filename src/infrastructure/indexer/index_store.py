@@ -38,6 +38,16 @@ class ImportEntry:
 
 
 @dataclass
+class CallEntry:
+    """A resolved function call: caller → callee across files."""
+    caller_file: str
+    caller_function: str
+    callee_file: str
+    callee_function: str
+    line: int
+
+
+@dataclass
 class EdgeEntry:
     """Dependency edge between files."""
     source: str
@@ -54,6 +64,7 @@ class IndexStore:
         self.symbols: dict[str, list[SymbolEntry]] = {}  # file_path → symbols
         self.imports: dict[str, list[ImportEntry]] = {}   # file_path → imports
         self.edges: list[EdgeEntry] = []
+        self.calls: list[CallEntry] = []                  # resolved call graph
         self._symbol_index: dict[str, list[str]] = {}     # symbol_name → file_paths
 
     @property
@@ -82,6 +93,13 @@ class IndexStore:
     def add_edge(self, edge: EdgeEntry) -> None:
         self.edges.append(edge)
 
+    def add_call(self, call: CallEntry) -> None:
+        self.calls.append(call)
+
+    @property
+    def call_count(self) -> int:
+        return len(self.calls)
+
     def remove_file(self, file_path: str) -> None:
         """Remove a file and all its associated data."""
         self.files.pop(file_path, None)
@@ -96,6 +114,10 @@ class IndexStore:
             edge for edge in self.edges
             if edge.source != file_path and edge.target != file_path
         ]
+        self.calls = [
+            call for call in self.calls
+            if call.caller_file != file_path and call.callee_file != file_path
+        ]
 
     def get_symbols_for_file(self, file_path: str) -> list[SymbolEntry]:
         return self.symbols.get(file_path, [])
@@ -105,6 +127,21 @@ class IndexStore:
 
     def get_files_defining_symbol(self, symbol_name: str) -> list[str]:
         return self._symbol_index.get(symbol_name, [])
+
+    def get_callers_of_symbol(self, symbol_name: str) -> list[CallEntry]:
+        """Find all call sites that call a given function/symbol."""
+        return [
+            call for call in self.calls
+            if call.callee_function == symbol_name
+        ]
+
+    def get_calls_in_file(self, file_path: str) -> list[CallEntry]:
+        """Get all outgoing calls from a file."""
+        return [call for call in self.calls if call.caller_file == file_path]
+
+    def get_callers_of_file(self, file_path: str) -> list[CallEntry]:
+        """Get all calls into functions defined in a file."""
+        return [call for call in self.calls if call.callee_file == file_path]
 
     def get_dependents(self, file_path: str) -> list[str]:
         """Files that depend on the given file (reverse edges)."""
@@ -150,6 +187,12 @@ class IndexStore:
                 {"source": edge.source, "target": edge.target,
                  "kind": edge.kind, "weight": edge.weight}
                 for edge in self.edges
+            ],
+            "calls": [
+                {"caller_file": call.caller_file, "caller_function": call.caller_function,
+                 "callee_file": call.callee_file, "callee_function": call.callee_function,
+                 "line": call.line}
+                for call in self.calls
             ],
         }
         target_path = Path(path)
@@ -198,6 +241,15 @@ class IndexStore:
             store.add_edge(EdgeEntry(
                 source=edge_data["source"], target=edge_data["target"],
                 kind=edge_data["kind"], weight=edge_data["weight"],
+            ))
+
+        for call_data in data.get("calls", []):
+            store.add_call(CallEntry(
+                caller_file=call_data["caller_file"],
+                caller_function=call_data["caller_function"],
+                callee_file=call_data["callee_file"],
+                callee_function=call_data["callee_function"],
+                line=call_data["line"],
             ))
 
         return store

@@ -6,13 +6,14 @@ import os
 from pathlib import Path
 
 from src.infrastructure.indexer.index_store import (
-    IndexStore, FileEntry, SymbolEntry, ImportEntry, EdgeEntry,
+    IndexStore, FileEntry, SymbolEntry, ImportEntry, EdgeEntry, CallEntry,
     compute_file_hash,
 )
 from src.infrastructure.parsers.language_detector import detect_language
 from src.infrastructure.parsers.import_dispatcher import dispatch_parse_imports
 from src.infrastructure.parsers.multi_lang_parser import MultiLangSymbolExtractor
 from src.infrastructure.complexity.lizard_analyzer import analyze_lizard
+from src.infrastructure.parsers.call_extractor import extract_calls
 
 _SOURCE_EXTENSIONS = {
     ".py", ".pyi", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp",
@@ -39,6 +40,7 @@ def build_full(root: str = ".") -> IndexStore:
         index_file(store, file_path)
 
     _build_edges(store)
+    _build_call_graph(store)
     return store
 
 
@@ -108,6 +110,14 @@ def index_file(store: IndexStore, file_path: str) -> None:
         for imp in import_refs
     ]
     store.add_imports(file_path, import_entries)
+
+    # Extract call sites (unresolved — callee_file not yet known)
+    language = detect_language(file_path)
+    if language:
+        call_sites = extract_calls(file_path, source, language)
+        if not hasattr(store, '_raw_calls'):
+            store._raw_calls = []
+        store._raw_calls.extend(call_sites)
 
 
 def find_source_files(root: str = ".") -> list[str]:
@@ -198,3 +208,34 @@ def _resolve_import(
 def _path_to_module(path: str) -> str:
     module_path = Path(path).with_suffix("")
     return str(module_path).replace("/", ".").replace("\\", ".")
+
+
+def _build_call_graph(store: IndexStore) -> None:
+    """Resolve raw call sites to cross-file call edges."""
+    raw_calls = getattr(store, '_raw_calls', [])
+    if not raw_calls:
+        return
+
+    # Build symbol → (file, function_name) index
+    symbol_to_location: dict[str, tuple[str, str]] = {}
+    for file_path, symbol_list in store.symbols.items():
+        for symbol in symbol_list:
+            if symbol.kind in ("function", "class", "method", "symbol"):
+                symbol_to_location.setdefault(symbol.name, (file_path, symbol.name))
+
+    for call_site in raw_calls:
+        location = symbol_to_location.get(call_site.callee_name)
+        if not location:
+            continue
+        callee_file, callee_function = location
+        if callee_file == call_site.caller_file:
+            continue  # skip intra-file calls
+        store.add_call(CallEntry(
+            caller_file=call_site.caller_file,
+            caller_function=call_site.caller_function,
+            callee_file=callee_file,
+            callee_function=callee_function,
+            line=call_site.line,
+        ))
+
+    del store._raw_calls

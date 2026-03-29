@@ -19,6 +19,29 @@ class ImpactResult:
 
 
 @dataclass
+class CallChain:
+    """A call chain from caller to callee."""
+    caller_file: str
+    caller_function: str
+    callee_file: str
+    callee_function: str
+    line: int
+
+
+@dataclass
+class CallImpactResult:
+    """Result of a call-graph impact query."""
+    target_symbol: str
+    target_file: str
+    direct_callers: list[CallChain]
+    transitive_callers: list[CallChain]
+
+    @property
+    def total_call_chains(self) -> int:
+        return len(self.direct_callers) + len(self.transitive_callers)
+
+
+@dataclass
 class HotspotEntry:
     """A file ranked by risk — high complexity + many dependents."""
     path: str
@@ -88,6 +111,63 @@ def find_hotspots(
 
     entries.sort(key=lambda entry: entry.score, reverse=True)
     return entries[:limit]
+
+
+def find_call_impact(
+    symbol_name: str,
+    get_callers_of_symbol: callable,
+    get_symbol_file: callable,
+    max_depth: int = 5,
+) -> CallImpactResult:
+    """Find all functions that call a given symbol, transitively.
+
+    Traces the call graph: who calls this function, who calls those, etc.
+    """
+    target_file = get_symbol_file(symbol_name)
+
+    direct = [
+        CallChain(
+            caller_file=call.caller_file,
+            caller_function=call.caller_function,
+            callee_file=call.callee_file,
+            callee_function=call.callee_function,
+            line=call.line,
+        )
+        for call in get_callers_of_symbol(symbol_name)
+    ]
+
+    # BFS: find transitive callers
+    visited: set[str] = {symbol_name}
+    queue: list[tuple[str, int]] = []
+    for chain in direct:
+        if chain.caller_function not in visited:
+            visited.add(chain.caller_function)
+            queue.append((chain.caller_function, 1))
+
+    transitive: list[CallChain] = []
+    while queue:
+        current_func, depth = queue.pop(0)
+        if depth >= max_depth:
+            continue
+        for call in get_callers_of_symbol(current_func):
+            chain = CallChain(
+                caller_file=call.caller_file,
+                caller_function=call.caller_function,
+                callee_file=call.callee_file,
+                callee_function=call.callee_function,
+                line=call.line,
+            )
+            transitive.append(chain)
+            if call.caller_function not in visited:
+                visited.add(call.caller_function)
+                queue.append((call.caller_function, depth + 1))
+
+    return CallImpactResult(
+        target_symbol=symbol_name,
+        target_file=target_file or "",
+        direct_callers=direct,
+        transitive_callers=transitive,
+    )
 
 
 def _bfs_reverse(

@@ -33,6 +33,7 @@ CYAN = "\033[36m"
 GREEN = "\033[32m"
 RED = "\033[31m"
 YELLOW = "\033[33m"
+DIM = "\033[2m"
 RESET = "\033[0m"
 
 
@@ -100,7 +101,7 @@ def _cmd_scan(args):
     import json as json_mod
     from src.infrastructure.indexer.incremental_indexer import build_full
     from src.infrastructure.indexer.index_store import IndexStore
-    from src.domain.service.graph_queries import find_impact, find_deps, find_hotspots
+    from src.domain.service.graph_queries import find_impact, find_deps, find_hotspots, find_call_impact
 
     cache_path = ".cortex-cache/index.msgpack"
 
@@ -115,7 +116,46 @@ def _cmd_scan(args):
 
     target = getattr(args, "file", None)
 
-    if target:
+    if args.symbol:
+        # Call-graph impact for a symbol
+        def get_symbol_file(name):
+            files = store.get_files_defining_symbol(name)
+            return files[0] if files else None
+        result = find_call_impact(args.symbol, store.get_callers_of_symbol, get_symbol_file)
+        if args.json:
+            print(json_mod.dumps({
+                "query": "call_impact",
+                "symbol": result.target_symbol,
+                "file": result.target_file,
+                "direct_callers": [
+                    {"caller_file": chain.caller_file, "caller_function": chain.caller_function,
+                     "line": chain.line}
+                    for chain in result.direct_callers
+                ],
+                "transitive_callers": [
+                    {"caller_file": chain.caller_file, "caller_function": chain.caller_function,
+                     "line": chain.line}
+                    for chain in result.transitive_callers
+                ],
+                "total_call_chains": result.total_call_chains,
+            }, indent=2))
+        else:
+            print(f"\n  {BOLD}Call impact of {CYAN}{result.target_symbol}{RESET}" +
+                  (f" ({result.target_file})" if result.target_file else "") + ":")
+            if result.direct_callers:
+                print(f"  Direct callers ({len(result.direct_callers)}):")
+                for chain in result.direct_callers:
+                    print(f"    {chain.caller_function}() in {chain.caller_file}:{chain.line}")
+            if result.transitive_callers:
+                print(f"  Transitive callers ({len(result.transitive_callers)}):")
+                for chain in result.transitive_callers:
+                    print(f"    {chain.caller_function}() in {chain.caller_file}:{chain.line}")
+            print(f"\n  Total call chains: {result.total_call_chains}")
+            if result.total_call_chains == 0:
+                print(f"  {DIM}No cross-file callers found.{RESET}")
+            print()
+
+    elif target:
         if target not in store.files:
             print(f"  {RED}File not found in index: {target}{RESET}")
             print(f"  Run {CYAN}kapa-cortex index{RESET} to rebuild.")
@@ -357,6 +397,7 @@ def _parse_args():
     # ── scan ──
     scan_parser = subparsers.add_parser("scan", help="Repo analysis — impact, hotspots, deps")
     scan_parser.add_argument("file", nargs="?", default=None, help="File to analyze impact (what breaks if this changes)")
+    scan_parser.add_argument("--symbol", type=str, metavar="NAME", help="Call-graph impact for a function/class")
     scan_parser.add_argument("--hotspots", action="store_true", help="Rank files by complexity × dependents")
     scan_parser.add_argument("--deps", type=str, metavar="FILE", help="Show what FILE depends on (forward)")
     scan_parser.add_argument("--limit", type=int, default=20, help="Max results for hotspots")
