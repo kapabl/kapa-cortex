@@ -293,7 +293,7 @@ def run_setup(
     plat = detect_platform()
 
     print(f"\n{BOLD}{'=' * 50}{RESET}")
-    print(f"{BOLD}  Ollama Setup for kapa-stacker{RESET}")
+    print(f"{BOLD}  Ollama Setup for kapa-cortex{RESET}")
     print(f"{BOLD}{'=' * 50}{RESET}")
     print(f"  Platform : {CYAN}{plat}{RESET}")
 
@@ -407,7 +407,7 @@ def _print_verdict(installed: bool, running: bool, models: list) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Setup ollama for kapa-stacker's --ai mode.",
+        description="Setup ollama for kapa-cortex's --ai mode.",
     )
     parser.add_argument(
         "--model", type=str, default=None,

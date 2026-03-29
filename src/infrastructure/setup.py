@@ -22,7 +22,7 @@ def run_full_setup(
 ) -> bool:
     """Install all external tools and Python deps."""
     print(f"\n{BOLD}{'=' * 50}{RESET}")
-    print(f"{BOLD}  kapa-stacker full setup{RESET}")
+    print(f"{BOLD}  kapa-cortex full setup{RESET}")
     print(f"{BOLD}{'=' * 50}{RESET}")
     print(f"  Platform: {CYAN}{_detect_platform()}{RESET}\n")
 
@@ -37,8 +37,8 @@ def run_full_setup(
 
     if ok:
         print(f"\n  {GREEN}Setup complete!{RESET}")
-        print(f"  Run: {CYAN}kapa-stacker --index{RESET} to pre-compute caches")
-        print(f"  Then: {CYAN}kapa-stacker{RESET} to analyze your branch")
+        print(f"  Run: {CYAN}kapa-cortex --index{RESET} to pre-compute caches")
+        print(f"  Then: {CYAN}kapa-cortex{RESET} to analyze your branch")
     else:
         print(f"\n  {YELLOW}Some tools failed to install. Core features still work.{RESET}")
 

@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kapa-stacker"
+name = "kapa-cortex"
 version = "0.1.0"
-description = "Split feature branches into reviewable, dependency-ordered stacked PRs"
+description = "Local code intelligence engine — stacked PRs, repo analysis, dependency graphs"
 requires-python = ">=3.10"
 dependencies = [
     "networkx>=3.0",
@@ -20,7 +20,7 @@ full = [
 ]
 
 [project.scripts]
-kapa-stacker = "src.presentation.cli:main"
+kapa-cortex = "src.presentation.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["src*"]

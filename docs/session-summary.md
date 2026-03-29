@@ -1,4 +1,4 @@
-# kapa-stacker — Session Summary
+# kapa-cortex — Session Summary
 
 > Generated from the initial build session. Use this to onboard into the codebase.
 
@@ -50,28 +50,28 @@ src/
 - **Test pairing** is a hard constraint — `test_foo.py` always stays with `foo.py` in the same PR.
 - **Domain has zero external imports.** Pure Python, testable without mocks.
 - **Old flat files deleted.** No `stacked_pr_analyzer.py`, `lang_parsers.py` etc. at root.
-- **Entry point:** `kapa-stacker` command (via `pyproject.toml`) or `python kapa-stacker.py`.
+- **Entry point:** `kapa-cortex` command (via `pyproject.toml`) or `python kapa-cortex.py`.
 - **Caches** go to `.stacker-cache/` (gitignored).
 
 ## CLI Commands
 
 ```bash
-kapa-stacker                          # analyze current branch vs main
-kapa-stacker --base develop           # diff against a different base
-kapa-stacker --setup                  # install ALL deps (ollama, ctags, scc, ast-grep, lizard)
-kapa-stacker --index                  # pre-compute caches (ctags, imports, co-change, complexity)
-kapa-stacker --generate-plan          # create .stacked-pr-plan.json with git commands
-kapa-stacker --check-plan             # show plan progress
-kapa-stacker --run-plan               # execute plan interactively
-kapa-stacker --run-plan --dry-run     # preview without executing
-kapa-stacker --run-plan --step 5      # execute single step
-kapa-stacker --extract "auth changes" # pull subset into a PR branch
-kapa-stacker --json                   # JSON output
-kapa-stacker --visualize              # DOT graph
-kapa-stacker --shell-script           # bash script to stdout
-kapa-stacker --print-commands         # copy-pasteable git commands
-kapa-stacker --no-ai                  # disable LLM
-kapa-stacker --ai-check               # check LLM backend status
+kapa-cortex                          # analyze current branch vs main
+kapa-cortex --base develop           # diff against a different base
+kapa-cortex --setup                  # install ALL deps (ollama, ctags, scc, ast-grep, lizard)
+kapa-cortex --index                  # pre-compute caches (ctags, imports, co-change, complexity)
+kapa-cortex --generate-plan          # create .stacked-pr-plan.json with git commands
+kapa-cortex --check-plan             # show plan progress
+kapa-cortex --run-plan               # execute plan interactively
+kapa-cortex --run-plan --dry-run     # preview without executing
+kapa-cortex --run-plan --step 5      # execute single step
+kapa-cortex --extract "auth changes" # pull subset into a PR branch
+kapa-cortex --json                   # JSON output
+kapa-cortex --visualize              # DOT graph
+kapa-cortex --shell-script           # bash script to stdout
+kapa-cortex --print-commands         # copy-pasteable git commands
+kapa-cortex --no-ai                  # disable LLM
+kapa-cortex --ai-check               # check LLM backend status
 ```
 
 ## Supported Languages
