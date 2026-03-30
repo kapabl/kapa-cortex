@@ -40,6 +40,7 @@ RESET = "\033[0m"
 def main() -> None:
     args = _parse_args()
     args.func(args)
+    sys.exit(0)
 
 
 # ── Subcommand handlers ──────────────────────────────────────────────────
@@ -113,7 +114,8 @@ def _query_local(action: str, params: dict) -> dict:
     from src.infrastructure.indexer.incremental_indexer import build_full
     from src.interface.daemon.handlers import (
         handle_impact, handle_deps, handle_hotspots, handle_calls,
-        handle_symbol_file_impact, set_index_store,
+        handle_symbol_file_impact, handle_symbol_impact_full,
+        set_index_store,
     )
 
     store = build_full()
@@ -125,6 +127,7 @@ def _query_local(action: str, params: dict) -> dict:
         "hotspots": handle_hotspots,
         "calls": handle_calls,
         "symbol_file_impact": handle_symbol_file_impact,
+        "symbol_impact_full": handle_symbol_impact_full,
     }
     handler = handlers.get(action)
     if not handler:
@@ -143,31 +146,13 @@ def _cmd_impact(args):
         print(f"  {RED}Provide a file or --symbol NAME{RESET}")
         sys.exit(1)
 
-    if args.symbol and args.calls and args.files:
-        # --symbol --calls --files: combined view
-        call_data = _query_or_local("calls", {"target": args.symbol})
-        file_data = _query_or_local("symbol_file_impact", {"target": args.symbol})
-        if args.json:
-            print(json_mod.dumps({"calls": call_data, "files": file_data}, indent=2))
-        else:
-            _print_symbol_impact(call_data)
-            _print_file_impact(file_data)
-    elif args.symbol and args.files:
-        # --symbol --files: file-level impact from the symbol's file
-        data = _query_or_local("symbol_file_impact", {"target": args.symbol})
+    if args.symbol:
+        data = _query_or_local("symbol_impact_full", {"target": args.symbol})
         if args.json:
             print(json_mod.dumps(data, indent=2))
         else:
-            _print_file_impact(data)
-    elif args.symbol:
-        # --symbol (default --calls): call graph impact
-        data = _query_or_local("calls", {"target": args.symbol})
-        if args.json:
-            print(json_mod.dumps(data, indent=2))
-        else:
-            _print_symbol_impact(data)
+            _print_full_impact(data, args)
     else:
-        # positional file: file-level impact
         data = _query_or_local("impact", {"target": target})
         if args.json:
             print(json_mod.dumps(data, indent=2))
@@ -217,6 +202,87 @@ def _print_file_impact(data: dict) -> None:
             print(f"    {path}")
     print(f"\n  Total affected: {total}")
     print()
+
+
+def _print_full_impact(data: dict, args) -> None:
+    """Print unified impact — filters by --calls, --files, --refs or shows all."""
+    symbol = data.get("symbol", "")
+    target_file = data.get("file", "")
+    calls = data.get("calls", [])
+    file_deps = data.get("file_deps", {})
+    lsp_refs = data.get("lsp_refs", [])
+    lsp_status = data.get("lsp_status", "unavailable")
+
+    show_all = not args.calls and not args.files and not args.refs
+
+    print(f"\n  {BOLD}Impact of {CYAN}{symbol}{RESET}" +
+          (f" ({target_file})" if target_file else "") + ":")
+
+    # Call graph section
+    if show_all or args.calls:
+        if calls:
+            affected_files = sorted({chain["caller_file"] for chain in calls})
+            print(f"  {BOLD}Calls{RESET} ({len(calls)} calls, {len(affected_files)} files):")
+            for chain in calls:
+                caller = chain.get("caller_function", "")
+                caller_file = chain.get("caller_file", "")
+                callee = chain.get("callee_function", "")
+                line = chain.get("line", 0)
+                depth = chain.get("depth", 0)
+                indent = "  " * depth
+                print(f"    {indent}{caller}() → {callee}()  {DIM}{caller_file}:{line}{RESET}")
+        elif show_all:
+            print(f"  {BOLD}Calls{RESET}: {DIM}none{RESET}")
+
+    # File deps section
+    if show_all or args.files:
+        direct = file_deps.get("direct", [])
+        transitive = file_deps.get("transitive", [])
+        total = file_deps.get("total", 0)
+        if direct or transitive:
+            print(f"  {BOLD}File deps{RESET} ({total} affected):")
+            for path in direct:
+                print(f"    {path}  {DIM}direct{RESET}")
+            for path in transitive:
+                print(f"    {path}  {DIM}transitive{RESET}")
+        elif show_all:
+            print(f"  {BOLD}File deps{RESET}: {DIM}none{RESET}")
+
+    # LSP refs section — grouped by file
+    if show_all or args.refs:
+        if lsp_refs:
+            print(f"  {BOLD}References{RESET} ({len(lsp_refs)}):")
+            _print_refs_grouped(lsp_refs)
+        elif lsp_status == "indexing":
+            print(f"  {BOLD}References{RESET}: {YELLOW}LSP still indexing — run again in a moment{RESET}")
+        elif lsp_status == "ready":
+            print(f"  {BOLD}References{RESET}: {DIM}none{RESET}")
+        else:
+            print(f"  {BOLD}References{RESET}: {DIM}no LSP server{RESET}")
+
+    print()
+
+
+def _print_refs_grouped(refs: list[dict]) -> None:
+    """Print references grouped by file with source lines and kind."""
+    from collections import defaultdict
+
+    by_file: dict[str, list[dict]] = defaultdict(list)
+    for ref in refs:
+        by_file[ref["file"]].append(ref)
+
+    for file_path in sorted(by_file.keys()):
+        file_refs = by_file[file_path]
+        short_path = file_path.rsplit("/", 1)[-1]
+        print(f"    {BOLD}{file_path}{RESET} ({len(file_refs)}):")
+        for ref in sorted(file_refs, key=lambda r: r["line"]):
+            line = ref["line"]
+            source = ref.get("source", "")
+            kind = ref.get("kind", "ref")
+            # Truncate long lines
+            if len(source) > 80:
+                source = source[:77] + "..."
+            print(f"      {line:4d}: {source}  {DIM}←{kind}{RESET}")
 
 
 def _cmd_hotspots(args):
@@ -422,8 +488,9 @@ def _parse_args():
     impact_parser = subparsers.add_parser("impact", help="What breaks if this changes")
     impact_parser.add_argument("file", nargs="?", help="File to analyze (file-to-file impact)")
     impact_parser.add_argument("--symbol", type=str, metavar="NAME", help="Symbol to analyze")
-    impact_parser.add_argument("--calls", action="store_true", help="Call graph impact (default for --symbol)")
-    impact_parser.add_argument("--files", action="store_true", help="File-level dependency impact")
+    impact_parser.add_argument("--calls", action="store_true", help="Show only call chains")
+    impact_parser.add_argument("--files", action="store_true", help="Show only file dependencies")
+    impact_parser.add_argument("--refs", action="store_true", help="Show only type/reference usage")
     impact_parser.add_argument("--json", action="store_true", help="JSON output")
     impact_parser.set_defaults(func=_cmd_impact)
 
@@ -643,7 +710,7 @@ def _fork_daemon_background():
         print(f"  {YELLOW}Daemon forked (pid {pid}) but socket not ready{RESET}", file=sys.stderr)
         return
 
-    # Child — become the daemon (index already on disk, suppress output)
+    # Child — become the daemon
     _os.setsid()
     _run_daemon_server(silent=True)
     _os._exit(0)
@@ -654,26 +721,45 @@ def _run_daemon_server(silent: bool = False):
     import io
     from src.interface.daemon.server import DaemonServer
     from src.interface.daemon.query_router import QueryRouter
-    from src.interface.daemon.handlers import build_handler_map, set_index_store
+    from src.interface.daemon.handlers import build_handler_map, set_index_store, set_lsp_resolver
     from src.infrastructure.indexer.incremental_indexer import build_full
     from src.infrastructure.indexer.graph_builder import STORE_PATH
+    from src.infrastructure.indexer.lsp_indexer import LspQueryResolver
+
+    def _boot_lsp_background():
+        """Boot LSP in a background thread — doesn't block the daemon."""
+        import threading
+        def _boot():
+            lsp_resolver = LspQueryResolver(".")
+            if not lsp_resolver.start():
+                print(f"  {YELLOW}LSP: no server available{RESET}", file=sys.stderr)
+                return
+            set_lsp_resolver(lsp_resolver)
+        thread = threading.Thread(target=_boot, daemon=True)
+        thread.start()
 
     def on_start():
         if silent:
-            sys.stderr = io.StringIO()  # suppress duplicate progress
+            sys.stderr = io.StringIO()
         store = build_full()
         set_index_store(store)
         if silent:
             sys.stderr = sys.__stderr__
 
+        # LSP boot disabled — needs proper daemon architecture
+        # _boot_lsp_background()
+
     def on_stop():
-        from src.interface.daemon.handlers import _get_index_store
+        from src.interface.daemon.handlers import _get_index_store, _get_lsp_resolver
         try:
             store = _get_index_store()
             if store and store.file_count > 0:
                 store.save(STORE_PATH)
         except (OSError, FileNotFoundError):
             pass
+        lsp = _get_lsp_resolver()
+        if lsp:
+            lsp.stop()
 
     server = DaemonServer(QueryRouter({}), on_start=on_start, on_stop=on_stop)
     router = QueryRouter(build_handler_map(server))

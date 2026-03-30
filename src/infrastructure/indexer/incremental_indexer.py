@@ -47,9 +47,9 @@ def build_full(root: str = ".") -> IndexStore:
     if store_path.exists():
         store = IndexStore.load(str(store_path))
         print(
-            f"  {GREEN}✓{RESET} Loaded index: {store.file_count} files, "
-            f"{store.symbol_count} symbols, {store.edge_count} edges, "
-            f"{store.call_count} calls",
+            f"  {GREEN}✓{RESET} Loaded index: {store.file_count:,} files, "
+            f"{store.symbol_count:,} symbols, {store.edge_count:,} edges, "
+            f"{store.call_count:,} calls",
             file=sys.stderr,
         )
         return store

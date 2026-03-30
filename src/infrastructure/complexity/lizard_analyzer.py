@@ -30,13 +30,15 @@ def _analyze_sequential(file_paths: list[str]) -> dict[str, FileComplexity]:
 
 
 def _analyze_parallel(file_paths: list[str]) -> dict[str, FileComplexity]:
+    import multiprocessing
+    ctx = multiprocessing.get_context("forkserver")
     metrics: dict[str, FileComplexity] = {}
-    with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+    with ProcessPoolExecutor(max_workers=_MAX_WORKERS, mp_context=ctx) as pool:
         futures = {pool.submit(_analyze_single, path): path for path in file_paths}
         for future in as_completed(futures):
             path = futures[future]
             try:
-                result = future.result()
+                result = future.result(timeout=10)
                 if result:
                     metrics[path] = result
             except Exception:

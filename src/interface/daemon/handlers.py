@@ -121,7 +121,7 @@ def handle_calls(params: dict) -> dict:
     files = store.get_files_defining_symbol(symbol)
     if not files:
         raise ValueError(f"Symbol not found in index: {symbol}")
-    target_file = files[0]
+    target_file, _ = _find_symbol_definition(store, symbol)
 
     result = find_symbol_impact(
         symbol, target_file, store.get_callers,
@@ -145,35 +145,243 @@ def handle_calls(params: dict) -> dict:
     }
 
 
+def handle_refs(params: dict) -> dict:
+    """Find all references to a symbol via LSP (calls + type refs)."""
+    symbol = params.get("target")
+    if not symbol:
+        raise ValueError("Missing 'target' parameter (symbol name)")
+
+    lsp = _get_lsp_resolver()
+    if not lsp or not lsp.available:
+        raise ValueError("LSP not available — no language server running")
+
+    store = _get_index_store()
+    files = store.get_files_defining_symbol(symbol)
+    if not files:
+        raise ValueError(f"Symbol not found in index: {symbol}")
+    target_file, symbol_line = _find_symbol_definition(store, symbol)
+
+    references = lsp.get_references(target_file, symbol, symbol_line)
+    incoming_calls = lsp.get_incoming_calls(target_file, symbol, symbol_line)
+
+    return {
+        "query": "refs",
+        "symbol": symbol,
+        "file": target_file,
+        "references": references,
+        "incoming_calls": incoming_calls,
+        "total_references": len(references),
+        "total_incoming_calls": len(incoming_calls),
+    }
+
+
+def _classify_references(
+    raw_refs: list[dict], symbol: str,
+) -> list[dict]:
+    """Enrich references with source line text and classification."""
+    from pathlib import Path
+
+    # Cache file contents to avoid re-reading
+    file_lines_cache: dict[str, list[str]] = {}
+    results: list[dict] = []
+
+    for ref in raw_refs:
+        file_path = ref["file"]
+        line_num = ref["line"]
+
+        if file_path not in file_lines_cache:
+            try:
+                file_lines_cache[file_path] = Path(file_path).read_text(
+                    errors="replace",
+                ).splitlines()
+            except (FileNotFoundError, PermissionError):
+                file_lines_cache[file_path] = []
+
+        lines = file_lines_cache[file_path]
+        source_line = lines[line_num - 1].strip() if line_num <= len(lines) else ""
+        kind = _classify_line(source_line, symbol)
+
+        results.append({
+            "file": file_path,
+            "line": line_num,
+            "source": source_line,
+            "kind": kind,
+        })
+
+    return results
+
+
+def _classify_line(source_line: str, symbol: str) -> str:
+    """Classify a reference line as call, type, inherits, member, or ref."""
+    stripped = source_line.lstrip()
+
+    # Inheritance: "class Foo : public Symbol" or ": Symbol("
+    if f": public {symbol}" in source_line or f": protected {symbol}" in source_line:
+        return "inherits"
+    if f": private {symbol}" in source_line:
+        return "inherits"
+
+    # Constructor call: "Symbol(" or "new Symbol("
+    if f"{symbol}(" in source_line or f"new {symbol}" in source_line:
+        return "call"
+
+    # Member function: "Symbol::method" or "symbol->method" or "symbol.method"
+    if f"{symbol}::" in source_line:
+        return "member"
+
+    # Pointer/reference type: "Symbol*" or "Symbol&" or "Symbol " as param
+    if f"{symbol}*" in source_line or f"{symbol}&" in source_line:
+        return "type"
+    if f"{symbol} " in source_line and ("(" in source_line or "," in source_line):
+        return "type"
+
+    # Cast
+    if f"static_cast<{symbol}" in source_line or f"dynamic_cast<{symbol}" in source_line:
+        return "cast"
+
+    # Template
+    if f"<{symbol}>" in source_line or f"<{symbol}," in source_line:
+        return "template"
+
+    return "ref"
+
+
+def _find_symbol_definition(store, symbol_name: str) -> tuple[str, int]:
+    """Find the best definition of a symbol — prefers declaration over implementation.
+
+    For C++ classes: prefers the class/struct in .h over the constructor in .cpp.
+    Returns (file_path, line).
+    """
+    _DECLARATION_KINDS = {"class", "struct", "interface", "enum", "type"}
+    _DEFINITION_KINDS = {"function", "func", "method", "methodSpec", "prototype"}
+
+    best_file = ""
+    best_line = 1
+    best_priority = 99
+
+    for file_path in store.get_files_defining_symbol(symbol_name):
+        for symbol in store.get_symbols_for_file(file_path):
+            if symbol.name != symbol_name:
+                continue
+            if symbol.kind in _DECLARATION_KINDS:
+                priority = 0  # declaration — best for LSP queries
+            elif symbol.kind in _DEFINITION_KINDS and file_path.endswith((".h", ".hpp")):
+                priority = 1  # prototype in header
+            elif symbol.kind in _DEFINITION_KINDS:
+                priority = 2  # implementation
+            else:
+                priority = 3
+
+            if priority < best_priority:
+                best_priority = priority
+                best_file = file_path
+                best_line = symbol.line
+
+    if not best_file:
+        files = store.get_files_defining_symbol(symbol_name)
+        best_file = files[0] if files else ""
+
+    return best_file, best_line
+
+
+def handle_symbol_impact_full(params: dict) -> dict:
+    """Unified symbol impact — best available from static index + LSP."""
+    from src.domain.service.graph_queries import find_symbol_impact, find_impact
+
+    symbol = params.get("target")
+    if not symbol:
+        raise ValueError("Missing 'target' parameter (symbol name)")
+
+    store = _get_index_store()
+    files = store.get_files_defining_symbol(symbol)
+    if not files:
+        raise ValueError(f"Symbol not found in index: {symbol}")
+    target_file, symbol_line = _find_symbol_definition(store, symbol)
+
+    # Call graph (static index)
+    call_result = find_symbol_impact(symbol, target_file, store.get_callers)
+    call_chains = [
+        {
+            "caller_function": chain.caller_function,
+            "caller_file": chain.caller_file,
+            "callee_function": chain.callee_function,
+            "line": chain.line,
+            "depth": chain.depth,
+        }
+        for chain in call_result.call_chains
+    ]
+
+    # File deps (static index)
+    file_result = find_impact(target_file, store.get_dependents)
+    file_deps = {
+        "direct": file_result.direct,
+        "transitive": file_result.transitive,
+        "total": file_result.total_affected,
+    }
+
+    # LSP refs (non-blocking check)
+    lsp = _get_lsp_resolver()
+    lsp_refs = []
+    lsp_status = "unavailable"
+    if lsp and lsp.available:
+        lsp.check_ready()
+        if lsp._ready:
+            lsp_status = "ready"
+            raw_refs = lsp.get_references(target_file, symbol, symbol_line)
+            lsp_refs = _classify_references(raw_refs, symbol)
+        else:
+            lsp_status = "indexing"
+
+    return {
+        "query": "symbol_impact_full",
+        "symbol": symbol,
+        "file": target_file,
+        "calls": call_chains,
+        "file_deps": file_deps,
+        "lsp_refs": lsp_refs,
+        "lsp_status": lsp_status,
+    }
+
+
 def handle_status(params: dict) -> dict:
     """Return daemon status."""
     store = _get_index_store()
+    lsp = _get_lsp_resolver()
     return {
         "running": True,
         "index_files": store.file_count if store else 0,
         "index_symbols": store.symbol_count if store else 0,
         "index_edges": store.edge_count if store else 0,
         "index_calls": store.call_count if store else 0,
+        "lsp_available": bool(lsp and lsp.available),
     }
 
 
-# Module-level index store — shared across handlers in daemon process
+# Module-level shared state — set by daemon on boot
 _index_store: "IndexStore | None" = None
+_lsp_resolver = None
 
 
 def set_index_store(store) -> None:
-    """Set the shared index store (called by daemon on boot)."""
     global _index_store
     _index_store = store
 
 
+def set_lsp_resolver(resolver) -> None:
+    global _lsp_resolver
+    _lsp_resolver = resolver
+
+
 def _get_index_store():
-    """Get the shared index store."""
     from src.infrastructure.indexer.index_store import IndexStore
     global _index_store
     if _index_store is None:
         _index_store = IndexStore()
     return _index_store
+
+
+def _get_lsp_resolver():
+    return _lsp_resolver
 
 
 def handle_symbol_file_impact(params: dict) -> dict:
@@ -209,7 +417,9 @@ def build_handler_map(server=None) -> dict:
         "deps": handle_deps,
         "hotspots": handle_hotspots,
         "calls": handle_calls,
+        "refs": handle_refs,
         "symbol_file_impact": handle_symbol_file_impact,
+        "symbol_impact_full": handle_symbol_impact_full,
         "status": handle_status,
     }
     if server:

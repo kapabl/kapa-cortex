@@ -66,8 +66,10 @@ def _parse_imports_single(path: str) -> tuple[str, list[dict]]:
 
 def _parse_imports_parallel(file_paths: list[str]) -> dict[str, list[dict]]:
     """Parse imports in parallel using multiple processes."""
+    import multiprocessing
+    ctx = multiprocessing.get_context("forkserver")
     result: dict[str, list[dict]] = {}
-    with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+    with ProcessPoolExecutor(max_workers=_MAX_WORKERS, mp_context=ctx) as pool:
         futures = {pool.submit(_parse_imports_single, path): path for path in file_paths}
         for future in as_completed(futures):
             try:
