@@ -211,10 +211,8 @@ def _classify_references(
 
 
 def _classify_line(source_line: str, symbol: str) -> str:
-    """Classify a reference line as call, type, inherits, member, or ref."""
-    stripped = source_line.lstrip()
-
-    # Inheritance: "class Foo : public Symbol" or ": Symbol("
+    """Classify a reference line as call, type, inherits, member, cast, template, or unknown."""
+    # Inheritance: "class Foo : public Symbol"
     if f": public {symbol}" in source_line or f": protected {symbol}" in source_line:
         return "inherits"
     if f": private {symbol}" in source_line:
@@ -224,25 +222,40 @@ def _classify_line(source_line: str, symbol: str) -> str:
     if f"{symbol}(" in source_line or f"new {symbol}" in source_line:
         return "call"
 
-    # Member function: "Symbol::method" or "symbol->method" or "symbol.method"
+    # Member access: "Symbol::method"
     if f"{symbol}::" in source_line:
         return "member"
-
-    # Pointer/reference type: "Symbol*" or "Symbol&" or "Symbol " as param
-    if f"{symbol}*" in source_line or f"{symbol}&" in source_line:
-        return "type"
-    if f"{symbol} " in source_line and ("(" in source_line or "," in source_line):
-        return "type"
 
     # Cast
     if f"static_cast<{symbol}" in source_line or f"dynamic_cast<{symbol}" in source_line:
         return "cast"
+    if f"reinterpret_cast<{symbol}" in source_line or f"const_cast<{symbol}" in source_line:
+        return "cast"
 
-    # Template
+    # Template argument
     if f"<{symbol}>" in source_line or f"<{symbol}," in source_line:
         return "template"
+    if f", {symbol}>" in source_line:
+        return "template"
 
-    return "ref"
+    # Type usage: pointer, reference, sizeof, alignof, decltype, typedef, using
+    if f"sizeof({symbol})" in source_line or f"alignof({symbol})" in source_line:
+        return "type"
+    if f"decltype({symbol})" in source_line:
+        return "type"
+    if f"{symbol}*" in source_line or f"{symbol}&" in source_line:
+        return "type"
+    if f"{symbol} " in source_line and ("(" in source_line or "," in source_line):
+        return "type"
+    if source_line.lstrip().startswith(("typedef ", "using ")):
+        return "type"
+
+    # Forward declaration: "class Symbol;" or "struct Symbol;"
+    stripped = source_line.lstrip()
+    if stripped.startswith(("class ", "struct ")) and stripped.rstrip().endswith(";"):
+        return "type"
+
+    return "unknown"
 
 
 def _find_symbol_definition(store, symbol_name: str) -> tuple[str, int]:
