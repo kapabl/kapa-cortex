@@ -78,11 +78,16 @@ class DaemonServer:
             if not raw:
                 return
             request = DaemonRequest.deserialize(raw)
-            response = self._router.handle(request)
+            response = self._router.handle(request, conn)
             conn.sendall(response.serialize())
         except Exception as exc:
-            error_response = DaemonResponse.fail(str(exc))
-            conn.sendall(error_response.serialize())
+            import sys, traceback
+            traceback.print_exc(file=sys.stderr)
+            try:
+                error_response = DaemonResponse.fail(str(exc))
+                conn.sendall(error_response.serialize())
+            except Exception:
+                pass
         finally:
             conn.close()
 

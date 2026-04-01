@@ -60,3 +60,7 @@ class DaemonResponse:
     @classmethod
     def fail(cls, error: str) -> DaemonResponse:
         return cls(status="error", error=error)
+
+    @classmethod
+    def progress(cls, message: str) -> DaemonResponse:
+        return cls(status="progress", data={"message": message})

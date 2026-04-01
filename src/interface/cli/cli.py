@@ -253,11 +253,9 @@ def _print_full_impact(data: dict, args) -> None:
         if lsp_refs:
             print(f"  {BOLD}References{RESET} ({len(lsp_refs)}):")
             _print_refs_grouped(lsp_refs)
-        elif lsp_status == "indexing":
-            print(f"  {BOLD}References{RESET}: {YELLOW}LSP still indexing — run again in a moment{RESET}")
         elif lsp_status == "ready":
             print(f"  {BOLD}References{RESET}: {DIM}none{RESET}")
-        else:
+        elif lsp_status == "unavailable":
             print(f"  {BOLD}References{RESET}: {DIM}no LSP server{RESET}")
 
     print()
@@ -673,52 +671,40 @@ def _install_claude_skill():
 
 
 def _ensure_daemon():
-    """Make sure the daemon is running. Start it if needed.
-
-    Index is built in the foreground (user sees progress),
-    then the daemon is forked into the background.
-    """
+    """Make sure the daemon is running. Start it if needed."""
     from src.interface.daemon.client import is_daemon_running
-    from src.infrastructure.indexer.incremental_indexer import build_full
-    from src.infrastructure.indexer.graph_builder import STORE_PATH
 
     if is_daemon_running():
         return
 
-    # Build index in foreground — user sees progress
-    store = build_full()
-    store.save(STORE_PATH)
-
-    # Fork daemon into background with the warm index
     _fork_daemon_background()
 
 
 def _fork_daemon_background():
-    """Fork a background daemon process and wait for socket."""
-    import os as _os
+    """Start daemon as a background subprocess."""
+    import subprocess
     import time as _time
+    import os as _os
     from src.interface.daemon.protocol import SOCKET_PATH
 
-    pid = _os.fork()
-    if pid > 0:
-        # Parent — wait for daemon socket to appear
-        for _ in range(300):  # up to 30 seconds
-            if _os.path.exists(SOCKET_PATH):
-                print(f"  {GREEN}Daemon started (pid {pid}){RESET}", file=sys.stderr)
-                return
-            _time.sleep(0.1)
-        print(f"  {YELLOW}Daemon forked (pid {pid}) but socket not ready{RESET}", file=sys.stderr)
-        return
+    # Spawn daemon as a separate process — avoids fork issues with threads/async
+    proc = subprocess.Popen(
+        ["kapa-cortex", "daemon", "start"],
+        stdout=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+    )
 
-    # Child — become the daemon
-    _os.setsid()
-    _run_daemon_server(silent=True)
-    _os._exit(0)
+    # Wait for socket
+    for _ in range(300):
+        if _os.path.exists(SOCKET_PATH):
+            print(f"  {GREEN}Daemon started (pid {proc.pid}){RESET}", file=sys.stderr)
+            return
+        _time.sleep(0.1)
+    print(f"  {YELLOW}Daemon started (pid {proc.pid}) but socket not ready{RESET}", file=sys.stderr)
 
 
-def _run_daemon_server(silent: bool = False):
-    """Run the daemon server (blocking). Used by both fork and explicit start."""
-    import io
+def _run_daemon_server():
+    """Run the daemon server (blocking)."""
     from src.interface.daemon.server import DaemonServer
     from src.interface.daemon.query_router import QueryRouter
     from src.interface.daemon.handlers import build_handler_map, set_index_store, set_lsp_resolver
@@ -726,28 +712,19 @@ def _run_daemon_server(silent: bool = False):
     from src.infrastructure.indexer.graph_builder import STORE_PATH
     from src.infrastructure.indexer.lsp_indexer import LspQueryResolver
 
-    def _boot_lsp_background():
-        """Boot LSP in a background thread — doesn't block the daemon."""
-        import threading
-        def _boot():
-            lsp_resolver = LspQueryResolver(".")
-            if not lsp_resolver.start():
-                print(f"  {YELLOW}LSP: no server available{RESET}", file=sys.stderr)
-                return
-            set_lsp_resolver(lsp_resolver)
-        thread = threading.Thread(target=_boot, daemon=True)
-        thread.start()
-
     def on_start():
-        if silent:
-            sys.stderr = io.StringIO()
+        import threading
+
         store = build_full()
         set_index_store(store)
-        if silent:
-            sys.stderr = sys.__stderr__
 
-        # LSP boot disabled — needs proper daemon architecture
-        # _boot_lsp_background()
+        lsp_resolver = LspQueryResolver(".")
+        set_lsp_resolver(lsp_resolver)
+
+        def _boot_lsp():
+            lsp_resolver.start()
+
+        threading.Thread(target=_boot_lsp, daemon=True).start()
 
     def on_stop():
         from src.interface.daemon.handlers import _get_index_store, _get_lsp_resolver

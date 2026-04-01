@@ -1,35 +1,30 @@
-"""LSP-based query resolver — uses language server for on-demand precision.
-
-LSP is NOT used during bulk indexing (too slow per-symbol).
-Instead, the daemon keeps an LSP server warm and queries it
-at impact time for precise references.
-"""
+"""LSP query resolver — boots LSP server, waits for index, serves queries."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from src.infrastructure.indexer.index_store import IndexStore, SymbolEntry
-from src.infrastructure.lsp.lsp_client import LspClient, detect_lsp_language
+from src.infrastructure.lsp.lsp_client import LspClient, detect_lsp_language, _SERVER_COMMANDS
 
 GREEN = "\033[32m"
 CYAN = "\033[36m"
 DIM = "\033[2m"
+YELLOW = "\033[33m"
 RESET = "\033[0m"
 
 
 class LspQueryResolver:
-    """On-demand LSP resolution for impact queries."""
+    """Boots LSP, waits for background index, serves reference queries."""
 
     def __init__(self, root: str):
         self._root = root
-        self._root_path = Path(root).resolve()
         self._client: LspClient | None = None
         self._language: str | None = None
+        self._ready = False
 
     def start(self) -> bool:
-        """Start the LSP server. Call once at daemon boot."""
+        """Start LSP server and wait for background indexing to finish."""
         self._language = detect_lsp_language(self._root)
         if not self._language:
             return False
@@ -39,88 +34,61 @@ class LspQueryResolver:
             self._client = None
             return False
 
-        from src.infrastructure.lsp.lsp_client import _SERVER_COMMANDS
-        server_info = _SERVER_COMMANDS.get(self._language)
-        binary = server_info[0] if server_info else "unknown"
-        print(f"  {CYAN}LSP: detected {self._language} project, starting {binary}...{RESET}", file=sys.stderr)
+        info = _SERVER_COMMANDS.get(self._language, ("?", []))
+        binary = info[0]
+        print(f"  {CYAN}LSP: starting {binary}...{RESET}", file=sys.stderr)
 
         if not self._client.start():
+            print(f"  {YELLOW}LSP: failed to start {binary}{RESET}", file=sys.stderr)
             self._client = None
             return False
 
-        print(f"  {GREEN}✓{RESET} LSP: {binary} started for {self._language}{RESET}", file=sys.stderr)
-        self._ready = False
-        return True
-
-    def check_ready(self) -> None:
-        """Check if LSP indexing is done (non-blocking). Updates _ready flag."""
-        if self._ready or not self._client:
-            return
-        if self._client._indexing_done.is_set():
+        print(f"  {CYAN}LSP: waiting for background index...{RESET}", file=sys.stderr)
+        if self._client.wait_ready():
             self._ready = True
+            print(f"  {GREEN}✓{RESET} LSP: {binary} ready", file=sys.stderr)
+            return True
+
+        print(f"  {YELLOW}LSP: index timeout{RESET}", file=sys.stderr)
+        self._ready = True  # use whatever is available
+        return True
 
     def stop(self) -> None:
         if self._client:
             self._client.stop()
             self._client = None
+        self._ready = False
 
     @property
     def available(self) -> bool:
-        return self._client is not None
+        return self._client is not None and self._ready
 
-    def get_references(
-        self, file_path: str, symbol_name: str, line: int,
-    ) -> list[dict]:
-        """Get all references to a symbol. Returns [{file, line}]."""
+    @property
+    def progress_message(self) -> str:
+        if self._client:
+            return self._client._progress_message
+        return ""
+
+    def get_references(self, file_path: str, symbol_name: str, line: int) -> list[dict]:
         if not self._client:
             return []
-
-        try:
-            locations = self._client.get_references(file_path, line - 1, 0)
-        except Exception:
-            return []
-
-        results: list[dict] = []
-        for location in locations:
-            ref_path = _uri_to_relative(location.uri, self._root_path)
+        root_path = Path(self._root).resolve()
+        locations = self._client.get_references(file_path, line - 1, 0)
+        results = []
+        for loc in locations:
+            loc_uri = loc.get("uri", "") if isinstance(loc, dict) else ""
+            loc_range = loc.get("range", {}) if isinstance(loc, dict) else {}
+            ref_path = _uri_to_relative(loc_uri, root_path)
             if not ref_path:
                 continue
-            ref_line = location.range.start.line + 1
+            ref_line = loc_range.get("start", {}).get("line", 0) + 1
             if ref_path == file_path and ref_line == line:
                 continue
             results.append({"file": ref_path, "line": ref_line})
-
-        return results
-
-    def get_incoming_calls(
-        self, file_path: str, symbol_name: str, line: int,
-    ) -> list[dict]:
-        """Get incoming calls to a symbol. Returns [{caller_file, caller_function, line}]."""
-        if not self._client:
-            return []
-
-        try:
-            calls = self._client.get_call_hierarchy(file_path, line - 1, 0)
-        except Exception:
-            return []
-
-        results: list[dict] = []
-        for call in calls:
-            caller = call.from_
-            caller_path = _uri_to_relative(caller.uri, self._root_path)
-            if not caller_path:
-                continue
-            results.append({
-                "caller_file": caller_path,
-                "caller_function": caller.name,
-                "line": caller.range.start.line + 1,
-            })
-
         return results
 
 
 def _uri_to_relative(uri: str, root_path: Path) -> str | None:
-    """Convert file:// URI to a path relative to root."""
     if not uri.startswith("file://"):
         return None
     absolute = Path(uri.replace("file://", ""))

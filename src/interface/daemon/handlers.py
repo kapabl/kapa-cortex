@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import socket
+
 from src.infrastructure.git.git_client import GitClient
 from src.infrastructure.parsers.multi_lang_parser import (
     MultiLangImportParser,
@@ -17,7 +19,7 @@ from src.application.analyze_branch import AnalyzeBranchUseCase
 from src.interface.reporters.json_reporter import build_json
 
 
-def handle_analyze(params: dict) -> dict:
+def handle_analyze(params: dict, conn: socket.socket) -> dict:
     """Run branch analysis and return JSON-serializable result."""
     git = GitClient()
     base = params.get("base") or git.detect_base()
@@ -44,7 +46,7 @@ def handle_analyze(params: dict) -> dict:
     return build_json(result.prs, result.branch, base, result.graph)
 
 
-def handle_impact(params: dict) -> dict:
+def handle_impact(params: dict, conn: socket.socket) -> dict:
     """Find files affected by changes to a target file."""
     from src.domain.service.graph_queries import find_impact
 
@@ -65,7 +67,7 @@ def handle_impact(params: dict) -> dict:
     }
 
 
-def handle_deps(params: dict) -> dict:
+def handle_deps(params: dict, conn: socket.socket) -> dict:
     """Find transitive dependencies of a target file."""
     from src.domain.service.graph_queries import find_deps
 
@@ -85,7 +87,7 @@ def handle_deps(params: dict) -> dict:
     }
 
 
-def handle_hotspots(params: dict) -> dict:
+def handle_hotspots(params: dict, conn: socket.socket) -> dict:
     """Find riskiest files — high complexity + many dependents."""
     from src.domain.service.graph_queries import find_hotspots
 
@@ -108,7 +110,7 @@ def handle_hotspots(params: dict) -> dict:
     }
 
 
-def handle_calls(params: dict) -> dict:
+def handle_calls(params: dict, conn: socket.socket) -> dict:
     """Find symbol impact via pure call graph."""
     from src.domain.service.graph_queries import find_symbol_impact
 
@@ -145,7 +147,7 @@ def handle_calls(params: dict) -> dict:
     }
 
 
-def handle_refs(params: dict) -> dict:
+def handle_refs(params: dict, conn: socket.socket) -> dict:
     """Find all references to a symbol via LSP (calls + type refs)."""
     symbol = params.get("target")
     if not symbol:
@@ -162,16 +164,13 @@ def handle_refs(params: dict) -> dict:
     target_file, symbol_line = _find_symbol_definition(store, symbol)
 
     references = lsp.get_references(target_file, symbol, symbol_line)
-    incoming_calls = lsp.get_incoming_calls(target_file, symbol, symbol_line)
 
     return {
         "query": "refs",
         "symbol": symbol,
         "file": target_file,
         "references": references,
-        "incoming_calls": incoming_calls,
         "total_references": len(references),
-        "total_incoming_calls": len(incoming_calls),
     }
 
 
@@ -284,7 +283,7 @@ def _find_symbol_definition(store, symbol_name: str) -> tuple[str, int]:
     return best_file, best_line
 
 
-def handle_symbol_impact_full(params: dict) -> dict:
+def handle_symbol_impact_full(params: dict, conn: socket.socket) -> dict:
     """Unified symbol impact — best available from static index + LSP."""
     from src.domain.service.graph_queries import find_symbol_impact, find_impact
 
@@ -319,18 +318,14 @@ def handle_symbol_impact_full(params: dict) -> dict:
         "total": file_result.total_affected,
     }
 
-    # LSP refs (non-blocking check)
-    lsp = _get_lsp_resolver()
+    # LSP refs — wait for LSP to become ready
     lsp_refs = []
     lsp_status = "unavailable"
-    if lsp and lsp.available:
-        lsp.check_ready()
-        if lsp._ready:
-            lsp_status = "ready"
-            raw_refs = lsp.get_references(target_file, symbol, symbol_line)
-            lsp_refs = _classify_references(raw_refs, symbol)
-        else:
-            lsp_status = "indexing"
+    lsp = _wait_for_lsp(conn)
+    if lsp:
+        lsp_status = "ready"
+        raw_refs = lsp.get_references(target_file, symbol, symbol_line)
+        lsp_refs = _classify_references(raw_refs, symbol)
 
     return {
         "query": "symbol_impact_full",
@@ -343,7 +338,7 @@ def handle_symbol_impact_full(params: dict) -> dict:
     }
 
 
-def handle_status(params: dict) -> dict:
+def handle_status(params: dict, conn: socket.socket) -> dict:
     """Return daemon status."""
     store = _get_index_store()
     lsp = _get_lsp_resolver()
@@ -384,7 +379,27 @@ def _get_lsp_resolver():
     return _lsp_resolver
 
 
-def handle_symbol_file_impact(params: dict) -> dict:
+def _wait_for_lsp(conn: socket.socket, timeout: int = 300):
+    """Block until the LSP resolver is ready, streaming progress to client."""
+    import time
+    from src.interface.daemon.protocol import DaemonResponse
+
+    deadline = time.monotonic() + timeout
+    last_message = ""
+    while time.monotonic() < deadline:
+        lsp = _get_lsp_resolver()
+        if lsp and lsp.available:
+            conn.sendall(DaemonResponse.progress("LSP: 100%").serialize())
+            return lsp
+        message = lsp.progress_message if lsp else "LSP: starting..."
+        if message and message != last_message:
+            conn.sendall(DaemonResponse.progress(message).serialize())
+            last_message = message
+        time.sleep(0.5)
+    return _get_lsp_resolver()
+
+
+def handle_symbol_file_impact(params: dict, conn: socket.socket) -> dict:
     """Find file-level impact for a symbol's file."""
     from src.domain.service.graph_queries import find_impact
 
@@ -423,7 +438,7 @@ def build_handler_map(server=None) -> dict:
         "status": handle_status,
     }
     if server:
-        handlers["shutdown"] = lambda params: _handle_shutdown(server)
+        handlers["shutdown"] = lambda params, conn: _handle_shutdown(server)
     return handlers
 
 

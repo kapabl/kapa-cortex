@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import socket
+
 from src.interface.daemon.protocol import DaemonRequest, DaemonResponse
 
 
@@ -11,14 +13,14 @@ class QueryRouter:
     def __init__(self, use_cases: dict):
         self._use_cases = use_cases
 
-    def handle(self, request: DaemonRequest) -> DaemonResponse:
+    def handle(self, request: DaemonRequest, conn: socket.socket) -> DaemonResponse:
         handler = self._use_cases.get(request.action)
         if not handler:
             return DaemonResponse.fail(
                 f"Unknown action: {request.action}"
             )
         try:
-            result = handler(request.params)
+            result = handler(request.params, conn)
             return DaemonResponse.ok(result)
         except Exception as exc:
             return DaemonResponse.fail(str(exc))

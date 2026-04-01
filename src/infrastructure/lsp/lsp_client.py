@@ -1,23 +1,27 @@
-"""LSP client — wraps pygls to talk to language servers."""
+"""LSP client — JSON-RPC over stdio.
+
+Uses asyncio subprocess directly (no pygls). Tracks $/progress
+notifications for background index readiness detection.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import sys
 import threading
 from pathlib import Path
-
-from lsprotocol import types as lsp
-from pygls.lsp.client import BaseLanguageClient
+from typing import Any
 
 GREEN = "\033[32m"
 CYAN = "\033[36m"
 DIM = "\033[2m"
+YELLOW = "\033[33m"
 RESET = "\033[0m"
 
+CONTENT_LENGTH = "Content-Length: "
 
-# Language → (server binary, server command)
 _SERVER_COMMANDS: dict[str, tuple[str, list[str]]] = {
     "python": ("pyright-langserver", ["pyright-langserver", "--stdio"]),
     "go": ("gopls", ["gopls", "serve"]),
@@ -27,217 +31,290 @@ _SERVER_COMMANDS: dict[str, tuple[str, list[str]]] = {
     "java": ("jdtls", ["jdtls"]),
     "typescript": ("typescript-language-server", ["typescript-language-server", "--stdio"]),
     "javascript": ("typescript-language-server", ["typescript-language-server", "--stdio"]),
-    "kotlin": ("kotlin-language-server", ["kotlin-language-server"]),
 }
 
 
 class LspClient:
-    """Manages an LSP server for a single language."""
+    """LSP client using raw JSON-RPC over stdio."""
 
     def __init__(self, language: str, root_path: str):
         self._language = language
         self._root_path = Path(root_path).resolve()
-        self._client: BaseLanguageClient | None = None
+        self._proc: asyncio.subprocess.Process | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
+        self._request_id = 0
+        self._pending: dict[int, asyncio.Future] = {}
         self._opened_files: set[str] = set()
-        self._indexing_done = threading.Event()
+        self._index_ready = threading.Event()
+        self._active_progress: set[str] = set()
+        self._progress_message = ""
+        self._reader_task: asyncio.Task | None = None
 
     @property
     def available(self) -> bool:
-        server_info = _SERVER_COMMANDS.get(self._language)
-        if not server_info:
+        info = _SERVER_COMMANDS.get(self._language)
+        if not info:
             return False
-        binary, _ = server_info
-        return shutil.which(binary) is not None
+        return shutil.which(info[0]) is not None
 
     def start(self) -> bool:
-        """Start the LSP server and initialize."""
-        server_info = _SERVER_COMMANDS.get(self._language)
-        if not server_info:
+        """Start the LSP server. Returns when initialized."""
+        info = _SERVER_COMMANDS.get(self._language)
+        if not info or not shutil.which(info[0]):
             return False
 
-        binary, command = server_info
-        if not shutil.which(binary):
-            return False
-
-        self._loop = asyncio.new_event_loop()
         started = threading.Event()
 
-        def _run_loop():
+        def _run():
+            self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
-            self._loop.run_until_complete(self._start_async(command))
-            started.set()
-            self._loop.run_forever()
+            try:
+                self._loop.run_until_complete(self._start_async(info[1]))
+                started.set()
+                self._loop.run_forever()
+            except Exception as exc:
+                print(f"  {YELLOW}LSP error: {exc}{RESET}", file=sys.stderr)
+                started.set()
 
-        self._loop_thread = threading.Thread(target=_run_loop, daemon=True)
+        self._loop_thread = threading.Thread(target=_run, daemon=True)
         self._loop_thread.start()
         started.wait(timeout=30)
-        return started.is_set()
+        return self._proc is not None
 
-    def wait_ready(self, timeout_seconds: int = 300) -> None:
-        """Wait for the LSP server to finish indexing."""
-        self._indexing_done.wait(timeout=timeout_seconds)
+    def wait_ready(self, timeout: int = 300) -> bool:
+        """Block until clangd reports quiescent."""
+        return self._index_ready.wait(timeout=timeout)
 
     def stop(self) -> None:
-        """Shutdown the LSP server."""
-        if self._client and self._loop:
+        if self._proc and self._loop and self._loop.is_running():
             try:
-                self._run(self._stop_async())
+                future = asyncio.run_coroutine_threadsafe(self._shutdown_async(), self._loop)
+                future.result(timeout=5)
             except Exception:
                 pass
             self._loop.call_soon_threadsafe(self._loop.stop)
-        self._client = None
-        self._loop = None
 
-    def _run(self, coro):
-        """Run an async coroutine from a sync context, thread-safe."""
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=30)
+    def get_references(self, file_path: str, line: int, column: int) -> list[dict]:
+        self._ensure_open(file_path)
+        uri = self._file_uri(file_path)
+        result = self._request("textDocument/references", {
+            "textDocument": {"uri": uri},
+            "position": {"line": line, "character": column},
+            "context": {"includeDeclaration": False},
+        })
+        return result if isinstance(result, list) else []
 
-    def get_references(
-        self, file_path: str, line: int, column: int,
-    ) -> list[lsp.Location]:
-        """Get all references to the symbol at the given position."""
-        if not self._client or not self._loop:
-            return []
-        return self._run(self._references_async(file_path, line, column))
-
-    def get_definition(
-        self, file_path: str, line: int, column: int,
-    ) -> lsp.Location | None:
-        """Get the definition location of the symbol at the given position."""
-        if not self._client or not self._loop:
-            return None
-        return self._run(self._definition_async(file_path, line, column))
-
-    def get_call_hierarchy(
-        self, file_path: str, line: int, column: int,
-    ) -> list[lsp.CallHierarchyIncomingCall]:
-        """Get incoming calls to the symbol at the given position."""
-        if not self._client or not self._loop:
-            return []
-        return self._run(self._incoming_calls_async(file_path, line, column))
-
-    async def _start_async(self, command: list[str]) -> None:
-        self._client = BaseLanguageClient("kapa-cortex", "0.1.0")
-        self._active_progress: set[str] = set()
-
-        @self._client.feature("textDocument/publishDiagnostics")
-        def _on_diagnostics(params):
-            pass
-
-        @self._client.feature("$/progress")
-        def _on_progress(params):
-            token = str(params.token)
-            value = params.value
-            kind = getattr(value, "kind", None)
-            if kind == "begin":
-                self._active_progress.add(token)
-                title = getattr(value, "title", "")
-                if title:
-                    print(f"\r\033[2K  {CYAN}LSP: {title}{RESET}", end="", file=sys.stderr, flush=True)
-            elif kind == "report":
-                message = getattr(value, "message", "")
-                percentage = getattr(value, "percentage", None)
-                if message or percentage is not None:
-                    pct = f" {percentage}%" if percentage is not None else ""
-                    print(f"\r\033[2K  {CYAN}LSP: {message}{pct}{RESET}", end="", file=sys.stderr, flush=True)
-            elif kind == "end":
-                self._active_progress.discard(token)
-                message = getattr(value, "message", "done")
-                print(f"\r\033[2K  {GREEN}✓{RESET} LSP: {message}", file=sys.stderr)
-                if not self._active_progress:
-                    self._indexing_done.set()
-
-        @self._client.feature("window/workDoneProgress/create")
-        def _on_create_progress(params):
-            return None
-
-        await self._client.start_io(*command)
-        root_uri = self._root_path.as_uri()
-        await self._client.initialize_async(lsp.InitializeParams(
-            root_uri=root_uri,
-            capabilities=lsp.ClientCapabilities(
-                window=lsp.WindowClientCapabilities(
-                    work_done_progress=True,
-                ),
-            ),
-            workspace_folders=[
-                lsp.WorkspaceFolder(uri=root_uri, name="root"),
-            ],
-        ))
-        self._client.initialized(lsp.InitializedParams())
-
-    async def _stop_async(self) -> None:
-        await self._client.shutdown_async(None)
-        self._client.exit(None)
-
-    async def _ensure_open(self, file_path: str) -> str:
-        """Ensure a file is opened in the LSP server."""
-        absolute = str(Path(file_path).resolve())
-        uri = Path(absolute).as_uri()
-        if uri not in self._opened_files:
-            source = Path(absolute).read_text(errors="replace")
-            language_id = _language_id(self._language)
-            self._client.text_document_did_open(lsp.DidOpenTextDocumentParams(
-                text_document=lsp.TextDocumentItem(
-                    uri=uri,
-                    language_id=language_id,
-                    version=1,
-                    text=source,
-                ),
-            ))
-            self._opened_files.add(uri)
-        return uri
-
-    async def _references_async(
-        self, file_path: str, line: int, column: int,
-    ) -> list[lsp.Location]:
-        uri = await self._ensure_open(file_path)
-        result = await self._client.text_document_references_async(
-            lsp.ReferenceParams(
-                text_document=lsp.TextDocumentIdentifier(uri=uri),
-                position=lsp.Position(line=line, character=column),
-                context=lsp.ReferenceContext(include_declaration=False),
-            ),
-        )
-        return result or []
-
-    async def _definition_async(
-        self, file_path: str, line: int, column: int,
-    ) -> lsp.Location | None:
-        uri = await self._ensure_open(file_path)
-        result = await self._client.text_document_definition_async(
-            lsp.DefinitionParams(
-                text_document=lsp.TextDocumentIdentifier(uri=uri),
-                position=lsp.Position(line=line, character=column),
-            ),
-        )
+    def get_definition(self, file_path: str, line: int, column: int) -> dict | None:
+        self._ensure_open(file_path)
+        uri = self._file_uri(file_path)
+        result = self._request("textDocument/definition", {
+            "textDocument": {"uri": uri},
+            "position": {"line": line, "character": column},
+        })
         if isinstance(result, list) and result:
             return result[0]
-        return result if isinstance(result, lsp.Location) else None
+        return result if isinstance(result, dict) else None
 
-    async def _incoming_calls_async(
-        self, file_path: str, line: int, column: int,
-    ) -> list[lsp.CallHierarchyIncomingCall]:
-        uri = await self._ensure_open(file_path)
-        items = await self._client.text_document_prepare_call_hierarchy_async(
-            lsp.CallHierarchyPrepareParams(
-                text_document=lsp.TextDocumentIdentifier(uri=uri),
-                position=lsp.Position(line=line, character=column),
-            ),
+    # ── Internal ──
+
+    def _request(self, method: str, params: dict) -> Any:
+        if not self._loop or not self._loop.is_running():
+            return None
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_request(method, params), self._loop,
         )
-        if not items:
-            return []
-        calls = await self._client.call_hierarchy_incoming_calls_async(
-            lsp.CallHierarchyIncomingCallsParams(item=items[0]),
+        return future.result(timeout=60)
+
+    def _ensure_open(self, file_path: str) -> None:
+        uri = self._file_uri(file_path)
+        if uri in self._opened_files:
+            return
+        try:
+            text = Path(file_path).resolve().read_text(errors="replace")
+        except (FileNotFoundError, PermissionError):
+            return
+        lang_id = self._language if self._language != "cpp" else "cpp"
+        self._notify("textDocument/didOpen", {
+            "textDocument": {
+                "uri": uri, "languageId": lang_id,
+                "version": 1, "text": text,
+            },
+        })
+        self._opened_files.add(uri)
+
+    def _notify(self, method: str, params: dict) -> None:
+        if not self._loop or not self._loop.is_running():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._send_notification(method, params), self._loop,
         )
-        return calls or []
+
+    def _file_uri(self, path: str) -> str:
+        return Path(path).resolve().as_uri()
+
+    def _find_trigger_file(self) -> Path | None:
+        """Find a source file to open, triggering CDB discovery."""
+        # For C/C++: grab first file from compile_commands.json
+        cdb = self._root_path / "compile_commands.json"
+        if cdb.exists():
+            import json as _json
+            entries = _json.loads(cdb.read_text(errors="replace"))
+            if entries:
+                return Path(entries[0]["file"]).resolve()
+        # Fallback: first matching file in root
+        extensions = {
+            "python": "*.py", "go": "*.go", "rust": "*.rs",
+            "java": "*.java", "typescript": "*.ts", "javascript": "*.js",
+        }
+        pattern = extensions.get(self._language)
+        if pattern:
+            for match in self._root_path.glob(pattern):
+                if match.is_file():
+                    return match
+        return None
+
+    # ── Async protocol ──
+
+    async def _start_async(self, command: list[str]) -> None:
+        cmd = " ".join(command)
+        self._proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        self._reader_task = asyncio.ensure_future(self._read_loop())
+
+        # Initialize
+        root_uri = self._root_path.as_uri()
+        await self._send_request("initialize", {
+            "rootUri": root_uri,
+            "capabilities": {"window": {"workDoneProgress": True}},
+            "workspaceFolders": [{"uri": root_uri, "name": "root"}],
+        })
+        await self._send_notification("initialized", {})
+
+        # Open a file to trigger CDB discovery and background indexing
+        trigger_file = self._find_trigger_file()
+        if trigger_file:
+            uri = trigger_file.as_uri()
+            text = trigger_file.read_text(errors="replace")
+            await self._send_notification("textDocument/didOpen", {
+                "textDocument": {
+                    "uri": uri, "languageId": self._language,
+                    "version": 1, "text": text,
+                },
+            })
+            self._opened_files.add(uri)
+
+    async def _shutdown_async(self) -> None:
+        try:
+            await self._send_request("shutdown", None)
+            await self._send_notification("exit", None)
+        except Exception:
+            pass
+        if self._reader_task:
+            self._reader_task.cancel()
+        if self._proc:
+            self._proc.terminate()
+            await self._proc.wait()
+
+    async def _send_request(self, method: str, params: Any) -> Any:
+        self._request_id += 1
+        req_id = self._request_id
+        msg = {"jsonrpc": "2.0", "id": req_id, "method": method}
+        if params is not None:
+            msg["params"] = params
+
+        future = self._loop.create_future()
+        self._pending[req_id] = future
+        await self._write(msg)
+        return await asyncio.wait_for(future, timeout=60)
+
+    async def _send_notification(self, method: str, params: Any) -> None:
+        msg = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            msg["params"] = params
+        await self._write(msg)
+
+    async def _write(self, msg: dict) -> None:
+        body = json.dumps(msg).encode("utf-8")
+        header = f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
+        self._proc.stdin.write(header + body)
+        await self._proc.stdin.drain()
+
+    async def _read_loop(self) -> None:
+        """Read JSON-RPC messages from stdout."""
+        try:
+            while True:
+                length = await self._read_header()
+                if length == 0:
+                    break
+                body = await self._proc.stdout.readexactly(length)
+                msg = json.loads(body.decode("utf-8"))
+                self._dispatch(msg)
+        except (asyncio.IncompleteReadError, ConnectionError, OSError):
+            pass
+
+    async def _read_header(self) -> int:
+        headers = b""
+        while b"\r\n\r\n" not in headers:
+            byte = await self._proc.stdout.read(1)
+            if not byte:
+                return 0
+            headers += byte
+        for line in headers.decode("utf-8").strip().split("\r\n"):
+            if line.startswith(CONTENT_LENGTH):
+                return int(line[len(CONTENT_LENGTH):])
+        return 0
+
+    def _dispatch(self, msg: dict) -> None:
+        """Route incoming JSON-RPC message."""
+        if "id" in msg and "method" not in msg:
+            # Response to our request
+            req_id = msg["id"]
+            if req_id in self._pending:
+                future = self._pending.pop(req_id)
+                if "error" in msg:
+                    future.set_result(None)
+                else:
+                    future.set_result(msg.get("result"))
+        elif "method" in msg:
+            # Notification or server request
+            method = msg["method"]
+            params = msg.get("params", {})
+            self._handle_notification(method, params, msg)
+
+    def _handle_notification(self, method: str, params: Any, raw: dict) -> None:
+        """Handle server notifications."""
+        if method == "$/progress":
+            token = str(params.get("token", ""))
+            value = params.get("value", {})
+            kind = value.get("kind", "")
+            if kind == "begin":
+                self._active_progress.add(token)
+                title = value.get("title", "")
+                self._progress_message = f"LSP: {title}"
+            elif kind == "report":
+                message = value.get("message", "")
+                percentage = value.get("percentage")
+                pct = f" {percentage}%" if percentage is not None else ""
+                self._progress_message = f"LSP: {message}{pct}"
+            elif kind == "end":
+                self._active_progress.discard(token)
+                self._progress_message = "LSP: 100%"
+                if not self._active_progress:
+                    self._index_ready.set()
+
+        elif method == "window/workDoneProgress/create":
+            if "id" in raw:
+                asyncio.ensure_future(self._write({
+                    "jsonrpc": "2.0", "id": raw["id"], "result": None,
+                }))
 
 
 def detect_lsp_language(root: str) -> str | None:
-    """Detect the primary language of a repo from project files."""
     root_path = Path(root)
     if (root_path / "go.mod").exists():
         return "go"
@@ -252,19 +329,3 @@ def detect_lsp_language(root: str) -> str | None:
     if (root_path / "build.gradle").exists() or (root_path / "pom.xml").exists():
         return "java"
     return None
-
-
-def _language_id(language: str) -> str:
-    """Map internal language name to LSP languageId."""
-    mapping = {
-        "python": "python",
-        "go": "go",
-        "rust": "rust",
-        "c": "c",
-        "cpp": "cpp",
-        "java": "java",
-        "kotlin": "kotlin",
-        "typescript": "typescript",
-        "javascript": "javascript",
-    }
-    return mapping.get(language, language)
