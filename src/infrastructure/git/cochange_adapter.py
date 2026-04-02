@@ -5,7 +5,15 @@ from __future__ import annotations
 import subprocess
 
 from src.domain.port.cochange_provider import CochangeProvider
-from src.infrastructure.indexer.cochange_cache import load_cochange_cache
+import json
+from pathlib import Path
+
+
+def load_cochange_cache(root: str = "."):
+    cache = Path(root) / ".cortex-cache" / "cochange.json"
+    if cache.exists():
+        return json.loads(cache.read_text())
+    return None
 
 
 class CachedCochangeProvider(CochangeProvider):

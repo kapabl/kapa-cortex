@@ -14,7 +14,6 @@ from src.domain.port.symbol_extractor import SymbolExtractor
 from src.infrastructure.parsers.import_dispatcher import dispatch_parse_imports
 from src.infrastructure.parsers.language_detector import detect_language
 from src.infrastructure.parsers import tree_sitter_parser as ts
-from src.infrastructure.parsers import ctags_parser
 
 
 class MultiLangImportParser(ImportParser):
@@ -25,17 +24,11 @@ class MultiLangImportParser(ImportParser):
 
 
 class MultiLangSymbolExtractor(SymbolExtractor):
-    """Extracts symbol definitions via tree-sitter, falls back to ctags."""
+    """Extracts symbol definitions via tree-sitter."""
 
     def extract(self, file_path: str, source: str) -> list[SymbolDef]:
         lang = detect_language(file_path)
         if not lang:
             return []
 
-        # Layer 1: tree-sitter
-        results = ts.extract_symbols(source, lang)
-        if results:
-            return results
-
-        # Layer 2: ctags
-        return ctags_parser.extract_symbols(file_path, source)
+        return ts.extract_symbols(source, lang)

@@ -5,7 +5,15 @@ from __future__ import annotations
 from src.domain.value_object.file_complexity import FileComplexity
 from src.domain.port.complexity_analyzer import ComplexityAnalyzer
 from src.infrastructure.complexity.analyzer import LizardAnalyzer
-from src.infrastructure.indexer.complexity_cache import load_complexity_cache
+import json
+from pathlib import Path
+
+
+def load_complexity_cache(root: str = "."):
+    cache = Path(root) / ".cortex-cache" / "complexity.json"
+    if cache.exists():
+        return json.loads(cache.read_text())
+    return None
 
 
 class CachedComplexityAnalyzer(ComplexityAnalyzer):

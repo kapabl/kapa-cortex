@@ -92,9 +92,9 @@ def _cmd_setup(args):
 
 
 def _cmd_index(args):
-    """Pre-compute caches."""
-    from src.infrastructure.indexer.index_all import index_repo
-    index_repo()
+    """Index the repository using the Rust engine."""
+    import subprocess
+    subprocess.run(["kapa-cortex-core", "index", "."])
 
 
 def _cmd_reindex(args):
@@ -219,7 +219,7 @@ def _cmd_explain(args):
 
 
 def _query_or_local(action: str, params: dict) -> dict:
-    """Route query through daemon (starting it if needed), or run locally with --no-daemon."""
+    """Route query through Rust daemon (starting it if needed)."""
     from src.interface.daemon.client import send_query
 
     _ensure_daemon()
@@ -228,33 +228,6 @@ def _query_or_local(action: str, params: dict) -> dict:
         print(f"  {RED}{response.error}{RESET}")
         sys.exit(1)
     return response.data
-
-
-def _query_local(action: str, params: dict) -> dict:
-    """Run a query locally without the daemon."""
-    from src.infrastructure.indexer.incremental_indexer import build_full
-    from src.interface.daemon.handlers import (
-        handle_impact, handle_deps, handle_hotspots, handle_calls,
-        handle_symbol_file_impact, handle_symbol_impact_full,
-        set_index_store,
-    )
-
-    store = build_full()
-    set_index_store(store)
-
-    handlers = {
-        "impact": handle_impact,
-        "deps": handle_deps,
-        "hotspots": handle_hotspots,
-        "calls": handle_calls,
-        "symbol_file_impact": handle_symbol_file_impact,
-        "symbol_impact_full": handle_symbol_impact_full,
-    }
-    handler = handlers.get(action)
-    if not handler:
-        print(f"  {RED}Unknown query: {action}{RESET}")
-        sys.exit(1)
-    return handler(params)
 
 
 def _cmd_impact(args):
@@ -815,121 +788,50 @@ def _install_claude_skill():
 
 
 def _ensure_daemon():
-    """Make sure the daemon is running. Start it if needed."""
+    """Make sure the Rust daemon is running. Start it if needed."""
     from src.interface.daemon.client import is_daemon_running
 
     if is_daemon_running():
         return
 
-    _fork_daemon_background()
-
-
-def _fork_daemon_background():
-    """Start daemon as a background subprocess."""
     import subprocess
     import time as _time
     import os as _os
-    from src.interface.daemon.protocol import SOCKET_PATH
 
-    # Spawn daemon as a separate process — avoids fork issues with threads/async
+    SOCKET_PATH = "/tmp/kapa-cortex.sock"
+    RUST_BINARY = "kapa-cortex-core"
+
     proc = subprocess.Popen(
-        ["kapa-cortex", "daemon", "start"],
+        [RUST_BINARY, "daemon", "start"],
         stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
     )
 
-    # Wait for socket
     for _ in range(300):
         if _os.path.exists(SOCKET_PATH):
             print(f"  {GREEN}Daemon started (pid {proc.pid}){RESET}", file=sys.stderr)
             return
         _time.sleep(0.1)
-    print(f"  {YELLOW}Daemon started (pid {proc.pid}) but socket not ready{RESET}", file=sys.stderr)
-
-
-def _run_daemon_server():
-    """Run the daemon server (blocking)."""
-    from src.interface.daemon.server import DaemonServer
-    from src.interface.daemon.query_router import QueryRouter
-    from src.interface.daemon.handlers import build_handler_map, set_index_store, set_lsp_resolver
-    from src.infrastructure.indexer.incremental_indexer import build_full
-    from src.infrastructure.indexer.graph_builder import STORE_PATH
-    from src.infrastructure.indexer.lsp_indexer import LspQueryResolver
-
-    def on_start():
-        import threading
-
-        store = build_full()
-        set_index_store(store)
-
-        lsp_resolver = LspQueryResolver(".")
-        set_lsp_resolver(lsp_resolver)
-
-        def _boot_lsp():
-            lsp_resolver.start()
-
-        threading.Thread(target=_boot_lsp, daemon=True).start()
-
-    def on_stop():
-        from src.interface.daemon.handlers import _get_index_store, _get_lsp_resolver
-        try:
-            store = _get_index_store()
-            if store and store.file_count > 0:
-                store.save(STORE_PATH)
-        except (OSError, FileNotFoundError):
-            pass
-        lsp = _get_lsp_resolver()
-        if lsp:
-            lsp.stop()
-
-    server = DaemonServer(QueryRouter({}), on_start=on_start, on_stop=on_stop)
-    router = QueryRouter(build_handler_map(server))
-    server._router = router
-    server.start()
+    print(f"  {YELLOW}Daemon started but socket not ready{RESET}", file=sys.stderr)
 
 
 def _start_daemon():
-    """Explicit daemon start (foreground, blocking)."""
-    from src.interface.daemon.client import is_daemon_running
-
-    if is_daemon_running():
-        print(f"  {YELLOW}Daemon already running.{RESET}")
-        return
-
-    print(f"  {BOLD}Starting kapa-cortex daemon...{RESET}")
-    _run_daemon_server()
+    """Start the Rust daemon (foreground)."""
+    import subprocess
+    subprocess.run(["kapa-cortex-core", "daemon", "start"])
 
 
 def _stop_daemon():
-    from src.interface.daemon.client import is_daemon_running, send_query
-
-    if not is_daemon_running():
-        print(f"  {YELLOW}No daemon running.{RESET}")
-        return
-
-    try:
-        response = send_query("shutdown")
-        print(f"  {GREEN}Daemon stopped.{RESET}" if response.status == "ok"
-              else f"  {RED}Failed: {response.error}{RESET}")
-    except (ConnectionResetError, ConnectionRefusedError, OSError):
-        print(f"  {GREEN}Daemon stopped.{RESET}")
+    """Stop the Rust daemon."""
+    import subprocess
+    subprocess.run(["kapa-cortex-core", "daemon", "stop"])
 
 
 def _print_daemon_status():
-    from src.interface.daemon.client import is_daemon_running, send_query
-
-    if not is_daemon_running():
-        print(f"  {RED}Daemon not running.{RESET}")
-        print(f"  Start with: {CYAN}kapa-cortex daemon start{RESET}")
-        return
-
-    response = send_query("status")
-    if response.status == "ok":
-        print(f"  {GREEN}Daemon running{RESET}")
-        for key, value in response.data.items():
-            print(f"    {key}: {value}")
-    else:
-        print(f"  {RED}Error: {response.error}{RESET}")
+    """Print Rust daemon status."""
+    import subprocess
+    subprocess.run(["kapa-cortex-core", "status"])
 
 
 

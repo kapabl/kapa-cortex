@@ -50,10 +50,11 @@ def send_query(
             response = _recv_response(conn)
             if response.status == "progress":
                 message = response.data.get("message", "")
-                print(f"\r\033[2K  \033[36m{message}\033[0m", end="", file=sys.stderr, flush=True)
+                if "100%" in message:
+                    print(f"\r\033[2K  \033[32m✓\033[0m {message}", file=sys.stderr)
+                else:
+                    print(f"\r\033[2K  \033[36m{message}\033[0m", end="", file=sys.stderr, flush=True)
                 continue
-            # Clear progress line before returning final response
-            print(f"\r\033[2K", end="", file=sys.stderr, flush=True)
             return response
     finally:
         conn.close()

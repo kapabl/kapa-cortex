@@ -290,10 +290,9 @@ def _install_skill():
 
 
 def _run_index():
-    """Pre-compute caches for the current repo."""
+    """Pre-compute caches for the current repo using Rust engine."""
     print(f"\n  {BOLD}Pre-computing caches...{RESET}")
     try:
-        from src.infrastructure.indexer.index_all import index_repo
-        index_repo()
-    except Exception as exc:
+        subprocess.run(["kapa-cortex-core", "index", "."], check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         print(f"    {YELLOW}⊘{RESET} indexing failed: {exc}")
