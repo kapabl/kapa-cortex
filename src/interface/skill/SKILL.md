@@ -88,6 +88,22 @@ kapa-cortex daemon query hotspots
 kapa-cortex daemon stop                 # shutdown
 ```
 
+## Understand Code Workflow
+
+When the user asks "what does X do", "how does X work", "explain this":
+
+```bash
+kapa-cortex explain <FQN>               # compact summary: signature, callers, callees, overrides
+```
+
+Returns ~200 tokens: the definition signature, who calls it, what it calls, and all
+overrides. This replaces reading 3-10 source files (~25K tokens) to build context.
+
+If the FQN is unknown, use `lookup` first to find it.
+
+After `explain`, only read the actual source file if you need the full implementation body.
+Target the specific file and line from the explain output — never explore blindly.
+
 ## Rename / Refactor Workflow
 
 When the user asks to rename a symbol, find usages, or refactor:
@@ -139,7 +155,8 @@ Benchmark: 5.9x fewer tokens for rename, up to 68x for high-fanout symbols.
 | `setup` | Install all dependencies |
 | `index` | Pre-compute caches |
 | `lookup SYMBOL` | Find all definitions with FQN scopes |
-| `refs FQN` | Find all LSP references to a scoped symbol |
+| `refs FQN [FQN...]` | Find LSP references (supports batch) |
+| `explain FQN` | Compact summary: signature, callers, callees, overrides |
 | `reindex [FILES]` | Re-index specific files via daemon |
 | `analyze` | Analyze branch, propose PRs |
 | `plan` | Generate execution plan |

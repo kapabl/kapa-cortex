@@ -170,36 +170,47 @@ def handle_lookup(params: dict, conn: socket.socket) -> dict:
 
 
 def handle_refs(params: dict, conn: socket.socket) -> dict:
-    """Find all references to a symbol via LSP. Takes FQN (Scope::name)."""
-    fqn = params.get("target")
-    if not fqn:
-        raise ValueError("Missing 'target' parameter (FQN like Class::method)")
+    """Find all references to symbols via LSP. Accepts one FQN or a list."""
+    targets = params.get("targets")
+    single_fqn = params.get("target")
 
-    # Split FQN into scope + name
-    if "::" in fqn:
-        scope, name = fqn.rsplit("::", 1)
-    else:
-        scope, name = "", fqn
+    if not targets and not single_fqn:
+        raise ValueError("Missing 'target' or 'targets' parameter")
+
+    fqn_list = targets if targets else [single_fqn]
 
     store = _get_index_store()
-    target_file, symbol_line = _find_scoped_definition(store, name, scope)
-    if not target_file:
-        raise ValueError(f"Symbol not found in index: {fqn}")
-
     lsp = _wait_for_lsp(conn)
     if not lsp:
         raise ValueError("LSP not available — timed out waiting for language server")
 
-    references = lsp.get_references(target_file, name, symbol_line)
+    results = []
+    for fqn in fqn_list:
+        if "::" in fqn:
+            scope, name = fqn.rsplit("::", 1)
+        else:
+            scope, name = "", fqn
 
-    return {
-        "query": "refs",
-        "fqn": fqn,
-        "file": target_file,
-        "line": symbol_line,
-        "references": references,
-        "total_references": len(references),
-    }
+        target_file, symbol_line = _find_scoped_definition(store, name, scope)
+        if not target_file:
+            results.append({"fqn": fqn, "error": f"not found: {fqn}"})
+            continue
+
+        references = lsp.get_references(target_file, name, symbol_line)
+        results.append({
+            "fqn": fqn,
+            "file": target_file,
+            "line": symbol_line,
+            "references": references,
+            "total_references": len(references),
+        })
+
+    if len(results) == 1:
+        result = results[0]
+        result["query"] = "refs"
+        return result
+
+    return {"query": "refs_batch", "results": results}
 
 
 def _find_scoped_definition(store, symbol_name: str, scope: str) -> tuple[str, int]:
@@ -504,6 +515,74 @@ def handle_reindex(params: dict, conn: socket.socket) -> dict:
     return {"reindexed": len(files)}
 
 
+def handle_explain(params: dict, conn: socket.socket) -> dict:
+    """Compact summary of a symbol: definition, callers, callees, overrides."""
+    fqn = params.get("target")
+    if not fqn:
+        raise ValueError("Missing 'target' parameter (FQN like Class::method)")
+
+    if "::" in fqn:
+        scope, name = fqn.rsplit("::", 1)
+    else:
+        scope, name = "", fqn
+
+    store = _get_index_store()
+    target_file, symbol_line = _find_scoped_definition(store, name, scope)
+    if not target_file:
+        raise ValueError(f"Symbol not found in index: {fqn}")
+
+    # Signature: read the definition line from the file
+    signature = _read_line(target_file, symbol_line)
+
+    # Callers from call graph index
+    callers = store.get_callers(name, target_file)
+    caller_list = [
+        {"function": c.caller_function, "file": c.caller_file, "line": c.line}
+        for c in callers
+    ]
+
+    # Callees: find calls where this function is the caller
+    callee_list = [
+        {"function": c.callee_function, "file": c.callee_file, "line": c.line}
+        for c in store.calls
+        if c.caller_function == name and c.caller_file == target_file
+    ]
+
+    # Overrides: other definitions of the same symbol name in different scopes
+    overrides = []
+    for file_path in store.get_files_defining_symbol(name):
+        for sym in store.get_symbols_for_file(file_path):
+            if sym.name == name and sym.scope != scope and sym.scope:
+                overrides.append({
+                    "fqn": f"{sym.scope}::{sym.name}",
+                    "file": file_path,
+                    "line": sym.line,
+                })
+
+    return {
+        "query": "explain",
+        "fqn": fqn,
+        "file": target_file,
+        "line": symbol_line,
+        "signature": signature,
+        "callers": caller_list,
+        "callees": callee_list,
+        "overrides": overrides,
+    }
+
+
+def _read_line(file_path: str, line: int) -> str:
+    """Read a single line from a file."""
+    from pathlib import Path
+    try:
+        lines = Path(file_path).read_text(errors="replace").splitlines()
+        if line <= len(lines):
+            return lines[line - 1].strip()
+    except (FileNotFoundError, PermissionError):
+        pass
+    return ""
+
+
 def build_handler_map(server=None) -> dict:
     """Build action → handler mapping for the query router."""
     handlers = {
@@ -514,6 +593,7 @@ def build_handler_map(server=None) -> dict:
         "calls": handle_calls,
         "lookup": handle_lookup,
         "refs": handle_refs,
+        "explain": handle_explain,
         "symbol_file_impact": handle_symbol_file_impact,
         "symbol_impact_full": handle_symbol_impact_full,
         "reindex": handle_reindex,

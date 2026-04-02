@@ -137,25 +137,85 @@ def _cmd_lookup(args):
 
 
 def _cmd_refs(args):
-    """Find all references to a symbol via LSP."""
+    """Find all references to symbols via LSP."""
     import json as json_mod
 
     _ensure_daemon()
-    data = _query_or_local("refs", {"target": args.fqn})
+    fqn_list = args.fqn
+    if len(fqn_list) == 1:
+        data = _query_or_local("refs", {"target": fqn_list[0]})
+    else:
+        data = _query_or_local("refs", {"targets": fqn_list})
 
     if args.json:
         print(json_mod.dumps(data, indent=2))
         return
 
+    if data.get("query") == "refs_batch":
+        for result in data.get("results", []):
+            _print_refs_result(result)
+            print()
+    else:
+        _print_refs_result(data)
+
+
+def _print_refs_result(data: dict) -> None:
+    """Print a single refs result."""
+    if "error" in data:
+        print(f"  {RED}{data['fqn']}: {data['error']}{RESET}")
+        return
     refs = data.get("references", [])
-    fqn = data.get("fqn", args.fqn)
+    fqn = data.get("fqn", "")
     source_file = data.get("file", "")
     source_line = data.get("line", 0)
-
     print(f"  {BOLD}{fqn}{RESET}  {DIM}defined at {source_file}:{source_line}{RESET}")
     print(f"  {len(refs)} references:")
     for ref in refs:
         print(f"    {ref['file']}:{ref['line']}")
+
+
+def _cmd_explain(args):
+    """Compact summary of a symbol: definition, callers, callees, overrides."""
+    import json as json_mod
+
+    _ensure_daemon()
+    data = _query_or_local("explain", {"target": args.fqn})
+
+    if args.json:
+        print(json_mod.dumps(data, indent=2))
+        return
+
+    fqn = data.get("fqn", args.fqn)
+    sig = data.get("signature", "")
+    source_file = data.get("file", "")
+    source_line = data.get("line", 0)
+    callers = data.get("callers", [])
+    callees = data.get("callees", [])
+    overrides = data.get("overrides", [])
+
+    print(f"  {BOLD}{fqn}{RESET}")
+    print(f"  {DIM}{sig}{RESET}")
+    print(f"  {DIM}{source_file}:{source_line}{RESET}")
+    print()
+
+    if callers:
+        print(f"  {BOLD}callers{RESET} ({len(callers)}):")
+        for caller in callers:
+            print(f"    {caller['function']}  {DIM}{caller['file']}:{caller['line']}{RESET}")
+    else:
+        print(f"  {BOLD}callers{RESET}: {DIM}none in index{RESET}")
+
+    if callees:
+        print(f"  {BOLD}callees{RESET} ({len(callees)}):")
+        for callee in callees:
+            print(f"    {callee['function']}  {DIM}{callee['file']}:{callee['line']}{RESET}")
+    else:
+        print(f"  {BOLD}callees{RESET}: {DIM}none in index{RESET}")
+
+    if overrides:
+        print(f"  {BOLD}overrides{RESET} ({len(overrides)}):")
+        for override in overrides:
+            print(f"    {override['fqn']}  {DIM}{override['file']}:{override['line']}{RESET}")
 
 
 def _query_or_local(action: str, params: dict) -> dict:
@@ -566,9 +626,15 @@ def _parse_args():
 
     # ── refs ──
     refs_parser = subparsers.add_parser("refs", help="Find all references to a symbol (LSP)")
-    refs_parser.add_argument("fqn", help="Fully qualified name (e.g. Class::method)")
+    refs_parser.add_argument("fqn", nargs="+", help="Fully qualified name(s) (e.g. Class::method)")
     refs_parser.add_argument("--json", action="store_true", help="JSON output")
     refs_parser.set_defaults(func=_cmd_refs)
+
+    # ── explain ──
+    explain_parser = subparsers.add_parser("explain", help="Compact symbol summary")
+    explain_parser.add_argument("fqn", help="Fully qualified name (e.g. Class::method)")
+    explain_parser.add_argument("--json", action="store_true", help="JSON output")
+    explain_parser.set_defaults(func=_cmd_explain)
 
     # ── hotspots ──
     hotspots_parser = subparsers.add_parser("hotspots", help="Rank files by complexity × dependents")
