@@ -102,7 +102,7 @@ pub fn index_repo(db: &Database, root: &str) -> Result<(), String> {
     );
     // Complexity via lizard
     let cx_start = Instant::now();
-    let cx_count = compute_complexity(db, &files, &root_prefix)?;
+    let cx_count = compute_complexity(db, root, &root_prefix)?;
     eprintln!(
         "  \x1b[32m✓\x1b[0m {} files with complexity ({:.1}s)",
         cx_count,
@@ -116,24 +116,22 @@ pub fn index_repo(db: &Database, root: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn compute_complexity(db: &Database, files: &[String], root_prefix: &str) -> Result<usize, String> {
+fn compute_complexity(db: &Database, root: &str, _root_prefix: &str) -> Result<usize, String> {
     use crate::infrastructure::complexity;
 
-    // Run lizard on all files at once for speed
-    let results = complexity::analyze_complexity(files);
+    let results = complexity::analyze_directory(root);
     let mut count = 0;
 
     db.with_conn(|conn| -> Result<(), String> {
         conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
         for fc in &results {
-            let relative = fc.path
-                .strip_prefix(root_prefix)
-                .unwrap_or(&fc.path);
-            conn.execute(
+            let updated = conn.execute(
                 "UPDATE files SET complexity = ?, lines = ? WHERE path = ?",
-                params![fc.complexity, fc.lines, relative],
+                params![fc.complexity, fc.lines, fc.path],
             ).map_err(|e| e.to_string())?;
-            count += 1;
+            if updated > 0 {
+                count += 1;
+            }
         }
         conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
         Ok(())

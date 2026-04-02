@@ -23,16 +23,14 @@ pub struct FileComplexity {
     pub complexity: i64,
 }
 
-/// Run lizard on a list of files, return complexity per file.
-pub fn analyze_complexity(files: &[String]) -> Vec<FileComplexity> {
-    // Run lizard in CSV mode for speed
+/// Run lizard on a directory recursively, return complexity per file.
+pub fn analyze_directory(root: &str) -> Vec<FileComplexity> {
     let output = match Command::new("lizard")
-        .args(["--csv", "--"])
-        .args(files)
+        .args(["--csv", root])
         .output()
     {
         Ok(o) => o,
-        Err(_) => return Vec::new(), // lizard not installed
+        Err(_) => return Vec::new(),
     };
 
     if !output.status.success() {
@@ -73,21 +71,23 @@ pub fn analyze_file(file_path: &str) -> Option<FileComplexity> {
 }
 
 fn parse_lizard_csv(csv: &str) -> Vec<FileComplexity> {
-    // lizard CSV: NLOC,CCN,Token,PARAM,Length,Location,File,...
-    // We want CCN (cyclomatic complexity) and group by file
+    // lizard CSV columns: NLOC,CCN,Token,PARAM,Length,Location,File,Function,LongName,StartLine,EndLine
+    // Column 1 = CCN, Column 6 = File (0-indexed)
     use std::collections::HashMap;
 
-    let mut by_file: HashMap<String, (i64, i64)> = HashMap::new(); // file -> (total_ccn, nloc)
+    let mut by_file: HashMap<String, (i64, i64)> = HashMap::new();
 
-    for line in csv.lines().skip(1) {
-        // skip header
+    for line in csv.lines() {
         let fields: Vec<&str> = line.split(',').collect();
-        if fields.len() < 7 {
+        if fields.len() < 8 {
             continue;
         }
-        let nloc: i64 = fields[0].trim().parse().unwrap_or(0);
+        let nloc: i64 = match fields[0].trim().parse() {
+            Ok(n) => n,
+            Err(_) => continue, // skip header
+        };
         let ccn: i64 = fields[1].trim().parse().unwrap_or(0);
-        let file = fields[fields.len() - 1].trim().trim_matches('"').to_string();
+        let file = fields[6].trim().trim_matches('"').trim_start_matches("./").to_string();
 
         let entry = by_file.entry(file).or_insert((0, 0));
         entry.0 += ccn;
