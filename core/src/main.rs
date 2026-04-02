@@ -43,6 +43,22 @@ fn main() {
                 query("reindex", serde_json::json!({"files": files}), false);
             }
         }
+        Command::Analyze { base, max_files, max_lines, json } => {
+            let base = base.unwrap_or_else(|| infrastructure::git::detect_base().unwrap_or("main".to_string()));
+            match application::analyze::analyze_branch(&base, max_files, max_lines) {
+                Ok(result) => {
+                    if json {
+                        iface::reporter::print_analysis_json(&result);
+                    } else {
+                        iface::reporter::print_analysis_text(&result);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  \x1b[31m{}\x1b[0m", e);
+                    std::process::exit(1);
+                }
+            }
+        }
         Command::InstallSkill => install_skill(),
     }
 }

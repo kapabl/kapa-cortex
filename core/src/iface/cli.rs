@@ -87,6 +87,21 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Analyze branch and propose stacked PRs
+    Analyze {
+        /// Base branch
+        #[arg(long)]
+        base: Option<String>,
+        /// Max files per PR
+        #[arg(long, default_value = "3")]
+        max_files: usize,
+        /// Max lines per PR
+        #[arg(long, default_value = "200")]
+        max_lines: i64,
+        /// JSON output
+        #[arg(long)]
+        json: bool,
+    },
     /// Check status
     Status,
     /// Re-index specific files

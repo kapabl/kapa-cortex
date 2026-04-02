@@ -6,3 +6,5 @@ pub mod hasher;
 pub mod imports;
 pub mod complexity;
 pub mod lsp;
+pub mod git;
+pub mod llm;
