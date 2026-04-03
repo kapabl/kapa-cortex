@@ -118,11 +118,11 @@ pub fn find_scoped_definition(
     Ok(rows.into_iter().next())
 }
 
-pub fn get_callers(conn: &Connection, function: &str, file: &str) -> rusqlite::Result<Vec<CallerInfo>> {
+pub fn get_callers(conn: &Connection, function: &str, _file: &str) -> rusqlite::Result<Vec<CallerInfo>> {
     let mut stmt = conn.prepare(
-        "SELECT caller_function, caller_file, line FROM calls WHERE callee_function = ? AND callee_file = ?",
+        "SELECT DISTINCT caller_function, caller_file, line FROM calls WHERE callee_function = ?",
     )?;
-    let rows = stmt.query_map(params![function, file], |row| {
+    let rows = stmt.query_map(params![function], |row| {
         Ok(CallerInfo { function: row.get(0)?, file: row.get(1)?, line: row.get(2)? })
     })?;
     rows.collect()
@@ -242,37 +242,36 @@ pub fn find_call_impact(conn: &Connection, symbol: &str, file: &str, max_depth: 
     Ok(result)
 }
 
-pub fn trace_path(conn: &Connection, src_fn: &str, src_file: &str, tgt_fn: &str, tgt_file: &str) -> rusqlite::Result<Vec<CallerInfo>> {
+pub fn trace_path(conn: &Connection, src_fn: &str, _src_file: &str, tgt_fn: &str, _tgt_file: &str) -> rusqlite::Result<Vec<CallerInfo>> {
     use std::collections::{HashMap, HashSet, VecDeque};
-    let mut visited: HashSet<(String, String)> = HashSet::new();
-    let mut parent: HashMap<(String, String), (String, String, i64)> = HashMap::new();
-    let mut queue: VecDeque<(String, String)> = VecDeque::new();
-    let start = (src_fn.to_string(), src_file.to_string());
-    let goal = (tgt_fn.to_string(), tgt_file.to_string());
-    queue.push_back(start.clone());
-    visited.insert(start.clone());
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut parent: HashMap<String, (String, String, i64)> = HashMap::new();
+    let mut queue: VecDeque<String> = VecDeque::new();
+    queue.push_back(src_fn.to_string());
+    visited.insert(src_fn.to_string());
 
-    let mut stmt = conn.prepare("SELECT callee_function, callee_file, line FROM calls WHERE caller_function = ? AND caller_file = ?")?;
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT callee_function, caller_file, line FROM calls WHERE caller_function = ?"
+    )?;
     while let Some(current) = queue.pop_front() {
-        if current == goal {
+        if current == tgt_fn {
             let mut path = Vec::new();
             let mut node = current;
-            while let Some((prev_fn, prev_file, line)) = parent.get(&node) {
-                path.push(CallerInfo { function: node.0.clone(), file: node.1.clone(), line: *line });
-                node = (prev_fn.clone(), prev_file.clone());
+            while let Some((prev_fn, file, line)) = parent.get(&node) {
+                path.push(CallerInfo { function: node.clone(), file: file.clone(), line: *line });
+                node = prev_fn.clone();
             }
             path.reverse();
             return Ok(path);
         }
         let callees: Vec<(String, String, i64)> = stmt
-            .query_map(params![current.0, current.1], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .query_map(params![current], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
             .collect::<Result<Vec<_>, _>>()?;
-        for (callee_fn, callee_file, line) in callees {
-            let next = (callee_fn, callee_file);
-            if !visited.contains(&next) {
-                visited.insert(next.clone());
-                parent.insert(next.clone(), (current.0.clone(), current.1.clone(), line));
-                queue.push_back(next);
+        for (callee_fn, caller_file, line) in callees {
+            if !visited.contains(&callee_fn) {
+                visited.insert(callee_fn.clone());
+                parent.insert(callee_fn.clone(), (current.clone(), caller_file, line));
+                queue.push_back(callee_fn);
             }
         }
     }

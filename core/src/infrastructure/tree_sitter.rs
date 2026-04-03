@@ -139,7 +139,11 @@ fn find_function_ancestor(node: tree_sitter::Node) -> tree_sitter::Node {
     let mut current = node;
     while let Some(parent) = current.parent() {
         let kind = parent.kind();
-        if kind.contains("function") || kind.contains("method") || kind == "translation_unit" {
+        // Skip declarators — they only span the signature, not the body.
+        // We want the full definition/declaration node that includes the body.
+        let is_definition = (kind.contains("function") || kind.contains("method"))
+            && !kind.contains("declarator");
+        if is_definition || kind == "translation_unit" {
             return parent;
         }
         current = parent;
@@ -175,6 +179,26 @@ mod tests {
         let calls = extract_calls(source, "cpp");
         assert!(!calls.is_empty());
         assert_eq!(calls[0].callee_name, "inner");
+    }
+
+    #[test]
+    fn test_cpp_qualified_caller() {
+        let source = "void Foo::bar(int x) { baz(); qux(1); }";
+        let calls = extract_calls(source, "cpp");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].caller_function, "bar");
+        assert_eq!(calls[0].callee_name, "baz");
+        assert_eq!(calls[1].caller_function, "bar");
+        assert_eq!(calls[1].callee_name, "qux");
+    }
+
+    #[test]
+    fn test_cpp_method_call() {
+        let source = "void Foo::bar() { obj->doStuff(); }";
+        let calls = extract_calls(source, "cpp");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].caller_function, "bar");
+        assert_eq!(calls[0].callee_name, "doStuff");
     }
 
     #[test]

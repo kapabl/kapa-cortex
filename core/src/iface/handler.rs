@@ -188,7 +188,7 @@ fn handle_impact(
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Not found: {}", target))?;
 
-        let callers = sqlite::find_call_impact(conn, name, &file, 10).map_err(|e| e.to_string())?;
+        let callers = sqlite::find_call_impact(conn, name, &file, 2).map_err(|e| e.to_string())?;
         let affected_files: Vec<String> = callers.iter().map(|c| c.file.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect();
         Ok(serde_json::json!({
             "query": "symbol_impact",

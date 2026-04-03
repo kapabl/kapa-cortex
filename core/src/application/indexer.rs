@@ -85,10 +85,23 @@ pub fn index_repo(db: &Database, root: &str) -> Result<(), String> {
         }
 
         conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+
+        // Resolve callee_file: tree-sitter only gives us the callee name,
+        // look up the actual file from the symbols table.
+        let resolved = conn.execute(
+            "UPDATE calls SET callee_file = COALESCE((
+                SELECT s.file_path FROM symbols s
+                WHERE s.name = calls.callee_function
+                  AND s.kind IN ('function', 'method', 'member')
+                LIMIT 1
+            ), '') WHERE callee_file = ''",
+            [],
+        ).map_err(|e| e.to_string())?;
+
         let elapsed = start.elapsed().as_secs_f32();
         eprintln!(
-            "\r\x1b[2K  \x1b[32m✓\x1b[0m {} symbols, {} imports, {} calls ({:.1}s)",
-            symbol_count, import_count, call_count, elapsed
+            "\r\x1b[2K  \x1b[32m✓\x1b[0m {} symbols, {} imports, {} calls ({} resolved) ({:.1}s)",
+            symbol_count, import_count, call_count, resolved, elapsed
         );
         Ok(())
     })?;
