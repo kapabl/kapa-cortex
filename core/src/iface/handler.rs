@@ -20,7 +20,7 @@ pub fn handle_connection_v2(
 ) -> std::io::Result<()> {
     let request = read_request(&mut stream)?;
     let response = state.db.with_conn(|conn| {
-        dispatch(&request.action, &request.params, conn, Some(&state.lsp))
+        dispatch(&request.action, &request.params, conn, Some(&state.lsp_clients))
     });
     write_response(&mut stream, &response)
 }
@@ -29,7 +29,7 @@ fn dispatch(
     action: &str,
     params: &serde_json::Value,
     conn: &Connection,
-    lsp_lock: Option<&std::sync::Mutex<Option<lsp::LspClient>>>,
+    lsp_lock: Option<&std::sync::Mutex<std::collections::HashMap<String, lsp::LspClient>>>,
 ) -> Response {
     let result = match action {
         "lookup" => handle_lookup(params, conn),
@@ -254,7 +254,7 @@ fn handle_calls(
 fn handle_refs(
     params: &serde_json::Value,
     conn: &Connection,
-    lsp_lock: Option<&std::sync::Mutex<Option<lsp::LspClient>>>,
+    lsp_lock: Option<&std::sync::Mutex<std::collections::HashMap<String, lsp::LspClient>>>,
 ) -> Result<serde_json::Value, String> {
     let fqn = get_target(params)?;
     let (scope, name) = split_fqn(fqn);
@@ -263,14 +263,27 @@ fn handle_refs(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Symbol not found: {}", fqn))?;
 
-    let lsp_client = lsp_lock
+    let clients = lsp_lock
         .ok_or_else(|| "LSP not available".to_string())?
         .lock()
         .map_err(|e| e.to_string())?;
 
-    let client = lsp_client
-        .as_ref()
-        .ok_or_else(|| "LSP not started".to_string())?;
+    // Pick the right LSP client based on file extension
+    let ext = std::path::Path::new(&file).extension()
+        .and_then(|e| e.to_str()).unwrap_or("");
+    let lang = match ext {
+        "c" | "h" | "cpp" | "cc" | "hpp" | "cxx" | "hxx" => "cpp",
+        "py" | "pyi" => "python",
+        "go" => "go",
+        "rs" => "rust",
+        "java" => "java",
+        "lua" => "lua",
+        "js" | "jsx" | "ts" | "tsx" => "typescript",
+        _ => return Err(format!("No LSP for file type: {}", ext)),
+    };
+
+    let client = clients.get(lang)
+        .ok_or_else(|| format!("No LSP running for {}", lang))?;
 
     let column = lsp::find_column(&file, line as usize, name) as i64;
     let raw_refs = client.get_references(&file, line - 1, column);
@@ -298,24 +311,29 @@ fn handle_refs(
 
 fn handle_status(
     conn: &Connection,
-    lsp_lock: Option<&std::sync::Mutex<Option<lsp::LspClient>>>,
+    lsp_lock: Option<&std::sync::Mutex<std::collections::HashMap<String, lsp::LspClient>>>,
 ) -> Result<serde_json::Value, String> {
     let files = sqlite::file_count(conn).map_err(|e| e.to_string())?;
     let symbols = sqlite::symbol_count(conn).map_err(|e| e.to_string())?;
     let edges = sqlite::edge_count(conn).map_err(|e| e.to_string())?;
     let calls = sqlite::call_count(conn).map_err(|e| e.to_string())?;
 
-    let lsp_status = if let Some(lock) = lsp_lock {
-        if let Ok(guard) = lock.lock() {
-            if guard.is_some() { "running" } else { "not started" }
+    let lsp_list: Vec<serde_json::Value> = if let Some(lock) = lsp_lock {
+        if let Ok(clients) = lock.lock() {
+            clients.keys().map(|lang| {
+                let server = lsp::server_binary(lang).unwrap_or("unknown");
+                serde_json::json!({
+                    "language": lang,
+                    "server": server,
+                    "status": "running",
+                })
+            }).collect()
         } else {
-            "error"
+            Vec::new()
         }
     } else {
-        "unavailable"
+        Vec::new()
     };
-
-    let language = lsp::detect_language(".").unwrap_or("none");
 
     Ok(serde_json::json!({
         "daemon": true,
@@ -323,10 +341,7 @@ fn handle_status(
         "symbols": symbols,
         "edges": edges,
         "calls": calls,
-        "lsp": {
-            "status": lsp_status,
-            "language": language,
-        },
+        "lsp": lsp_list,
     }))
 }
 

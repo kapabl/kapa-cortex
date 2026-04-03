@@ -180,9 +180,14 @@ fn server_command(language: &str) -> Option<(&'static str, Vec<&'static str>)> {
         "go" => Some(("gopls", vec!["serve"])),
         "rust" => Some(("rust-analyzer", vec![])),
         "java" => Some(("jdtls", vec![])),
+        "lua" => Some(("lua-language-server", vec![])),
         "typescript" | "javascript" => Some(("typescript-language-server", vec!["--stdio"])),
         _ => None,
     }
+}
+
+pub fn server_binary(language: &str) -> Option<&'static str> {
+    server_command(language).map(|(bin, _)| bin)
 }
 
 fn path_to_uri(path: &str) -> String {
@@ -209,14 +214,72 @@ fn find_trigger_file(root: &str, language: &str) -> Option<String> {
 }
 
 pub fn detect_language(root: &str) -> Option<&'static str> {
+    detect_all_languages(root).into_iter().next()
+}
+
+/// Detect all languages present in the repo from project files.
+pub fn detect_all_languages(root: &str) -> Vec<&'static str> {
     let root = Path::new(root);
-    if root.join("go.mod").exists() { return Some("go"); }
-    if root.join("Cargo.toml").exists() { return Some("rust"); }
-    if root.join("CMakeLists.txt").exists() || root.join("compile_commands.json").exists() { return Some("cpp"); }
-    if root.join("pyproject.toml").exists() || root.join("setup.py").exists() { return Some("python"); }
-    if root.join("package.json").exists() { return Some("typescript"); }
-    if root.join("build.gradle").exists() || root.join("pom.xml").exists() { return Some("java"); }
-    None
+    let mut langs = Vec::new();
+
+    if root.join("CMakeLists.txt").exists() || root.join("compile_commands.json").exists() {
+        langs.push("cpp");
+    }
+    if root.join("pyproject.toml").exists() || root.join("setup.py").exists()
+        || root.join("requirements.txt").exists()
+    {
+        langs.push("python");
+    }
+    if root.join("go.mod").exists() {
+        langs.push("go");
+    }
+    if root.join("Cargo.toml").exists() {
+        langs.push("rust");
+    }
+    if root.join("package.json").exists() {
+        langs.push("typescript");
+    }
+    if root.join("build.gradle").exists() || root.join("pom.xml").exists() {
+        langs.push("java");
+    }
+    // Lua: check for .rockspec, .luacheckrc, or lua files in common places
+    if root.join(".luacheckrc").exists() || root.join(".luarc.json").exists() {
+        langs.push("lua");
+    }
+
+    // If no project files found, scan for source files
+    if langs.is_empty() {
+        let mut found: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.take(200).flatten() {
+                if let Some(ext) = entry.path().extension() {
+                    match ext.to_str().unwrap_or("") {
+                        "cpp" | "cc" | "c" | "h" | "hpp" => { found.insert("cpp"); }
+                        "py" => { found.insert("python"); }
+                        "go" => { found.insert("go"); }
+                        "rs" => { found.insert("rust"); }
+                        "lua" => { found.insert("lua"); }
+                        "java" => { found.insert("java"); }
+                        "ts" | "tsx" | "js" => { found.insert("typescript"); }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        langs.extend(found);
+    }
+
+    // Filter to only languages with an available server binary
+    langs.retain(|lang| {
+        if let Some(bin) = server_binary(lang) {
+            std::process::Command::new("which").arg(bin).output()
+                .map(|o| o.status.success()).unwrap_or(false)
+        } else {
+            false
+        }
+    });
+
+    langs
 }
 
 /// Find column where symbol starts on a given line.

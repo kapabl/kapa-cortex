@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::Arc;
@@ -9,7 +10,24 @@ pub const SOCKET_PATH: &str = "/tmp/kapa-cortex.sock";
 
 pub struct DaemonState {
     pub db: Database,
-    pub lsp: std::sync::Mutex<Option<LspClient>>,
+    pub lsp_clients: std::sync::Mutex<HashMap<String, LspClient>>,
+}
+
+impl DaemonState {
+    pub fn get_lsp_for_file(&self, file_path: &str) -> Option<String> {
+        let ext = std::path::Path::new(file_path).extension()?.to_str()?;
+        let lang = match ext {
+            "c" | "h" | "cpp" | "cc" | "hpp" | "cxx" | "hxx" => "cpp",
+            "py" | "pyi" => "python",
+            "go" => "go",
+            "rs" => "rust",
+            "java" => "java",
+            "lua" => "lua",
+            "js" | "jsx" | "ts" | "tsx" => "typescript",
+            _ => return None,
+        };
+        Some(lang.to_string())
+    }
 }
 
 pub fn run(db: Arc<Database>) -> std::io::Result<()> {
@@ -18,28 +36,32 @@ pub fn run(db: Arc<Database>) -> std::io::Result<()> {
         std::fs::remove_file(socket_path)?;
     }
 
-    // Boot LSP in background
-    let language = crate::infrastructure::lsp::detect_language(".");
-    let lsp: std::sync::Mutex<Option<LspClient>> = std::sync::Mutex::new(None);
-    if let Some(lang) = language {
-        eprintln!("  \x1b[36mBooting LSP for {}...\x1b[0m", lang);
+    // Detect all languages in the repo and boot LSP for each
+    let languages = crate::infrastructure::lsp::detect_all_languages(".");
+    let mut clients: HashMap<String, LspClient> = HashMap::new();
+
+    for lang in &languages {
+        eprint!("  \x1b[36mBooting LSP for {}...\x1b[0m", lang);
         match LspClient::start(lang, ".") {
             Some(client) => {
-                eprintln!("  \x1b[32m✓\x1b[0m LSP ready");
-                *lsp.lock().unwrap() = Some(client);
+                eprintln!("\r\x1b[2K  \x1b[32m✓\x1b[0m LSP: {} ready", lang);
+                clients.insert(lang.to_string(), client);
             }
             None => {
-                eprintln!("  \x1b[33mLSP not available\x1b[0m");
+                eprintln!("\r\x1b[2K  \x1b[33m✗\x1b[0m LSP: {} not available", lang);
             }
         }
     }
 
+    if clients.is_empty() {
+        eprintln!("  \x1b[33mNo LSP servers available\x1b[0m");
+    }
+
     let state = Arc::new(DaemonState {
-        db: Arc::try_unwrap(db).unwrap_or_else(|arc| {
-            // Can't unwrap, open a new connection
+        db: Arc::try_unwrap(db).unwrap_or_else(|_arc| {
             Database::open(&Path::new(".cortex-cache/index.db")).unwrap()
         }),
-        lsp,
+        lsp_clients: std::sync::Mutex::new(clients),
     });
 
     let listener = UnixListener::bind(socket_path)?;
@@ -52,7 +74,6 @@ pub fn run(db: Arc<Database>) -> std::io::Result<()> {
                 std::thread::spawn(move || {
                     if let Err(err) = handler::handle_connection_v2(stream, &state) {
                         let msg = err.to_string();
-                        // Silently ignore probe connections (health checks, ensure_daemon)
                         if !msg.contains("fill whole buffer") && !msg.contains("broken pipe") {
                             eprintln!("  \x1b[33mHandler error: {}\x1b[0m", msg);
                         }
